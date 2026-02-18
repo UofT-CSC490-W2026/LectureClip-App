@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - '../../src/lambdas/**'
+      - 'src/lambdas/**'
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
@@ -26,9 +26,11 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
 
       - name: Build
-        run: sam build VideoUploadFunction --template template.yaml
+        run: sam build VideoUploadFunction --template template.yaml --use-container
 
       - name: Deploy
         uses: aws-actions/aws-lambda-deploy@v1
@@ -53,9 +55,11 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
 
       - name: Build
-        run: sam build MultipartInitFunction --template template.yaml
+        run: sam build MultipartInitFunction --template template.yaml --use-container
 
       - name: Deploy
         uses: aws-actions/aws-lambda-deploy@v1
@@ -80,9 +84,11 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
 
       - name: Build
-        run: sam build MultipartCompleteFunction --template template.yaml
+        run: sam build MultipartCompleteFunction --template template.yaml --use-container
 
       - name: Deploy
         uses: aws-actions/aws-lambda-deploy@v1
