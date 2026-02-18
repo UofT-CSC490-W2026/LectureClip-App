@@ -1,0 +1,7 @@
+{
+  "httpMethod": "POST",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{\"filename\": \"lecture.mp4\", \"userId\": \"user-123\", \"contentType\": \"video/mp4\"}"
+}

@@ -1,0 +1,40 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: LectureClip Lambda functions (SAM template for local dev)
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Timeout: 30
+    Environment:
+      Variables:
+        BUCKET_NAME: !Ref BucketName
+        REGION: !Ref AWS::Region
+
+Parameters:
+  BucketName:
+    Type: String
+    Default: lectureclip-user-videos-local
+    Description: S3 bucket name (use your real dev bucket for presigned URLs to work)
+
+Resources:
+  VideoUploadFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: lectureclip-video-upload
+      Handler: index.handler
+      CodeUri: src/lambdas/video-upload/
+
+  MultipartInitFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: lectureclip-multipart-init
+      Handler: index.handler
+      CodeUri: src/lambdas/multipart-init/
+
+  MultipartCompleteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: lectureclip-multipart-complete
+      Handler: index.handler
+      CodeUri: src/lambdas/multipart-complete/

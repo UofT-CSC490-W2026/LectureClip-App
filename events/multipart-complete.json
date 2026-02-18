@@ -1,0 +1,7 @@
+{
+  "httpMethod": "POST",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{\"fileKey\": \"2024-01-01T00:00:00/user-123/large-lecture.mp4\", \"uploadId\": \"REPLACE_WITH_REAL_UPLOAD_ID\", \"parts\": [{\"PartNumber\": 1, \"ETag\": \"REPLACE_WITH_REAL_ETAG\"}]}"
+}
