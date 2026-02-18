@@ -7,7 +7,7 @@ s3_client = boto3.client('s3')
 BUCKET_NAME = os.environ['BUCKET_NAME']
 REGION = os.environ['REGION']
 
-ALLOWED_TYPES = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/webm', 'video/mpeg', 'video/x-matroska']
+ALLOWED_TYPES = ['video/mp4', 'video/mov']
 PRESIGNED_URL_EXPIRY = 300  # 5 minutes
 
 

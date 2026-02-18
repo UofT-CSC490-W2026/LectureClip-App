@@ -43,11 +43,7 @@ class TestVideoUpload:
         mock_s3.generate_presigned_url.return_value = FAKE_URL
         for content_type in [
             "video/mp4",
-            "video/quicktime",
-            "video/x-msvideo",
-            "video/webm",
-            "video/mpeg",
-            "video/x-matroska",
+            "video/mov",
         ]:
             body = {**VALID_BODY, "contentType": content_type}
             with patch.object(mod, "s3_client", mock_s3):

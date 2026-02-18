@@ -1,8 +1,10 @@
 # LectureClip - Application
 
-Serverless AWS backend for uploading lecture videos directly to S3.
+Serverless AWS backend for uploading lecture videos directly to S3 and transcribing them with Amazon Transcribe.
 
-## API Architecture
+## Architecture
+
+### Video Upload
 
 ```
 Client
@@ -16,9 +18,35 @@ Client
                             finalizes upload with ETags
 ```
 
-All three Lambdas are Python 3.13, read `BUCKET_NAME` and `REGION` from environment variables, and respond with `Access-Control-Allow-Origin: *` headers.
+The upload Lambdas are Python 3.13, read `BUCKET_NAME` and `REGION` from environment variables, and respond with `Access-Control-Allow-Origin: *` headers.
 
 **S3 key format:** `{ISO-timestamp}/{userId}/{filename}`
+
+### Audio Transcription Pipeline
+
+Once a video lands in S3, an SNS notification triggers the transcription workflow:
+
+```
+S3 Event (via SNS)
+  │
+  └──► S3TriggerFunction          filters .mp4/.mov files, starts Step Functions execution
+         │
+         └──► Step Functions State Machine
+                │
+                └──► StartTranscribeFunction   starts Transcribe job; stores task token in DynamoDB
+                           │
+                           └──► Amazon Transcribe (async)
+                                  │
+                                  └──► EventBridge (job completion)
+                                         │
+                                         └──► ProcessTranscribeFunction  signals Step Functions success/failure
+```
+
+| Lambda | Trigger | Key env vars |
+|--------|---------|-------------|
+| `s3-trigger` | SNS-wrapped S3 `ObjectCreated` event | `STATE_MACHINE_ARN` |
+| `start-transcribe` | Step Functions (`waitForTaskToken`) | `TRANSCRIBE_TABLE`, `TRANSCRIPTS_BUCKET` |
+| `process-transcribe` | EventBridge (Transcribe job state change) | `TRANSCRIBE_TABLE` |
 
 ## Repository Structure
 
@@ -27,11 +55,20 @@ LectureClip-App/
 ├── src/
 │   └── lambdas/
 │       ├── video-upload/
-│       │   └── index.py           # POST /upload — presigned PUT URL for files ≤ 100 MB
+│       │   └── index.py                  # POST /upload — presigned PUT URL for files ≤ 100 MB
 │       ├── multipart-init/
-│       │   └── index.py           # POST /multipart/init — create multipart upload, return part URLs
-│       └── multipart-complete/
-│           └── index.py           # POST /multipart/complete — finalize multipart upload
+│       │   └── index.py                  # POST /multipart/init — create multipart upload, return part URLs
+│       ├── multipart-complete/
+│       │   └── index.py                  # POST /multipart/complete — finalize multipart upload
+│       ├── s3-trigger/
+│       │   └── index.py                  # SNS/S3 trigger — filters video files, starts Step Functions
+│       ├── start-transcribe/
+│       │   └── index.py                  # Step Functions task — starts Transcribe job, stores token in DynamoDB
+│       └── process-transcribe/
+│           ├── index.py                  # EventBridge trigger — signals Step Functions on Transcribe completion
+│           ├── dynamodb_utils.py         # DynamoDB helpers
+│           ├── step_function_utils.py    # Step Functions signal helpers
+│           └── transcribe_utils.py      # Transcribe result parsing helpers
 ├── tests/
 │   ├── conftest.py                # Shared fixtures and Lambda loader
 │   ├── test_video_upload.py       # Unit tests for POST /upload
@@ -272,14 +309,3 @@ The deploy script:
 4. Calls `aws lambda update-function-code` and waits for the update to propagate
 
 The artifacts bucket name is auto-resolved from `aws sts get-caller-identity` if `--bucket` is not provided.
-
-## Lambda Configuration
-
-| Setting | Value |
-|---------|-------|
-| Runtime | Python 3.13 |
-| Timeout | 30 seconds |
-| Direct upload URL expiry | 5 minutes |
-| Multipart part URL expiry | 1 hour |
-| Multipart part size | 100 MB |
-| Max file size (client) | 5 GB |
