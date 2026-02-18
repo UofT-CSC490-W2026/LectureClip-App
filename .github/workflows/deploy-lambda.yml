@@ -1,0 +1,93 @@
+name: Deploy Lambda
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '../../src/lambdas/**'
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
+
+jobs:
+  deploy-video-upload:
+    name: Deploy video-upload Lambda
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/setup-sam@v2
+
+      - name: Build
+        run: sam build VideoUploadFunction --template template.yaml
+
+      - name: Deploy
+        uses: aws-actions/aws-lambda-deploy@v1
+        with:
+          function-name: lectureclip-video-upload
+          code-artifacts-dir: .aws-sam/build/VideoUploadFunction
+          handler: index.handler
+          runtime: python3.13
+
+  deploy-multipart-init:
+    name: Deploy multipart-init Lambda
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/setup-sam@v2
+
+      - name: Build
+        run: sam build MultipartInitFunction --template template.yaml
+
+      - name: Deploy
+        uses: aws-actions/aws-lambda-deploy@v1
+        with:
+          function-name: lectureclip-multipart-init
+          code-artifacts-dir: .aws-sam/build/MultipartInitFunction
+          handler: index.handler
+          runtime: python3.13
+
+  deploy-multipart-complete:
+    name: Deploy multipart-complete Lambda
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/setup-sam@v2
+
+      - name: Build
+        run: sam build MultipartCompleteFunction --template template.yaml
+
+      - name: Deploy
+        uses: aws-actions/aws-lambda-deploy@v1
+        with:
+          function-name: lectureclip-multipart-complete
+          code-artifacts-dir: .aws-sam/build/MultipartCompleteFunction
+          handler: index.handler
+          runtime: python3.13
