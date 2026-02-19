@@ -8,7 +8,7 @@ from step_function_utils import send_task_success, send_task_failure
 
 dynamodb = boto3.resource("dynamodb")
 
-TRANSCRIBE_TABLE_NAME = os.environ.get("TRANSCRIBE_TABLE")
+TRANSCRIBE_TABLE_NAME = os.environ["TRANSCRIBE_TABLE"]
 transcribe_table = dynamodb.Table(TRANSCRIBE_TABLE_NAME)
 
 

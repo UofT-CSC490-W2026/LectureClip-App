@@ -2,13 +2,13 @@ import json
 import math
 import boto3
 import os
-from datetime import datetime
+from datetime import datetime, UTC
 
 s3_client = boto3.client('s3')
 BUCKET_NAME = os.environ['BUCKET_NAME']
 REGION = os.environ['REGION']
 
-ALLOWED_TYPES = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/webm', 'video/mpeg', 'video/x-matroska']
+ALLOWED_TYPES = ['video/mp4', 'video/mov']
 PART_SIZE = 100 * 1024 * 1024  # 100 MB per part
 PRESIGNED_URL_EXPIRY = 3600    # 1 hour (parts may take longer to upload)
 
@@ -49,7 +49,7 @@ def handler(event, context):
 
         # Build key: {timestamp}/{userId}/{filename}
         filename = filename_path.split('/')[-1]
-        timestamp = datetime.utcnow().isoformat()
+        timestamp = datetime.now(UTC)
         key = f"{timestamp}/{user_id}/{filename}"
 
         # Create multipart upload

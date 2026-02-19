@@ -3,11 +3,10 @@ import os
 import json
 import urllib.parse
 import time
-import os.path
 
 sfn_client = boto3.client("stepfunctions")
 
-STATE_MACHINE_ARN = os.environ.get("STATE_MACHINE_ARN")
+STATE_MACHINE_ARN = os.environ["STATE_MACHINE_ARN"]
 VIDEO_EXTENSIONS = [".mp4", ".mov"]
 
 

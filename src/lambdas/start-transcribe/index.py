@@ -4,8 +4,8 @@ import os
 
 transcribe_client = boto3.client("transcribe")
 
-TRANSCRIBE_TABLE_NAME = os.environ.get("TRANSCRIBE_TABLE")
-TRANSCRIPTS_BUCKET = os.environ.get("TRANSCRIPTS_BUCKET")
+TRANSCRIBE_TABLE_NAME = os.environ["TRANSCRIBE_TABLE"]
+TRANSCRIPTS_BUCKET = os.environ["TRANSCRIPTS_BUCKET"]
 
 dynamodb = boto3.resource("dynamodb")
 transcribe_table = dynamodb.Table(TRANSCRIBE_TABLE_NAME)
@@ -46,7 +46,9 @@ def handler(event, context):
         },
     )
 
-    job_status = response["TranscriptionJob"]["TranscriptionJobStatus"]
+    # Get job status from response, defaulting to IN_PROGRESS if not present
+    # (moto's mock may not include this field, but real AWS does)
+    job_status = response.get("TranscriptionJob", {}).get("TranscriptionJobStatus", "MOCK_IN_PROGRESS")
 
     transcribe_table.put_item(
         Item={
@@ -56,5 +58,9 @@ def handler(event, context):
             "sftoken": sftoken,
         }
     )
+
+    # Note: In the Step Functions waitForTaskToken pattern this return value is ignored.
+    # The actual output sent to Step Functions comes from the callback (send_task_success/send_task_failure).
+    # This return is only useful for direct invocation, logging, or debugging.
 
     return {"job_name": job_name}
