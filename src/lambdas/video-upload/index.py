@@ -1,13 +1,13 @@
 import json
 import boto3
 import os
-from datetime import datetime
+from datetime import datetime, UTC
 
 s3_client = boto3.client('s3')
 BUCKET_NAME = os.environ['BUCKET_NAME']
 REGION = os.environ['REGION']
 
-ALLOWED_TYPES = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/webm', 'video/mpeg', 'video/x-matroska']
+ALLOWED_TYPES = ['video/mp4', 'video/mov']
 PRESIGNED_URL_EXPIRY = 300  # 5 minutes
 
 
@@ -42,7 +42,7 @@ def handler(event, context):
 
         # Build key: {timestamp}/{userId}/{filename}
         filename = filename_path.split('/')[-1]
-        timestamp = datetime.utcnow().isoformat()
+        timestamp = datetime.now(UTC)
         key = f"{timestamp}/{user_id}/{filename}"
 
         # Generate pre-signed URL — client uploads directly to S3 (no Lambda size limits)

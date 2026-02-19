@@ -17,6 +17,16 @@ Parameters:
     Default: lectureclip-user-videos-local
     Description: S3 bucket name (use your real dev bucket for presigned URLs to work)
 
+  StateMachineArn:
+    Type: String
+    Default: ""
+    Description: Step Functions audio-transcription state machine ARN
+
+  TranscribeTable:
+    Type: String
+    Default: lectureclip-transcriptions-local
+    Description: DynamoDB table name for transcription job tracking
+
 Resources:
   VideoUploadFunction:
     Type: AWS::Serverless::Function
@@ -38,3 +48,36 @@ Resources:
       FunctionName: lectureclip-multipart-complete
       Handler: index.handler
       CodeUri: src/lambdas/multipart-complete/
+
+  S3TriggerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: lectureclip-s3-trigger
+      Handler: index.handler
+      CodeUri: src/lambdas/s3-trigger/
+      Environment:
+        Variables:
+          STATE_MACHINE_ARN: !Ref StateMachineArn
+
+  StartTranscribeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: lectureclip-start-transcribe
+      Handler: index.handler
+      CodeUri: src/lambdas/start-transcribe/
+      Timeout: 60
+      Environment:
+        Variables:
+          TRANSCRIBE_TABLE: !Ref TranscribeTable
+          TRANSCRIPTS_BUCKET: !Ref BucketName
+
+  ProcessTranscribeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: lectureclip-process-transcribe
+      Handler: index.handler
+      CodeUri: src/lambdas/process-transcribe/
+      Timeout: 60
+      Environment:
+        Variables:
+          TRANSCRIBE_TABLE: !Ref TranscribeTable

@@ -97,3 +97,90 @@ jobs:
           code-artifacts-dir: .aws-sam/build/MultipartCompleteFunction
           handler: index.handler
           runtime: python3.13
+
+  deploy-s3-trigger:
+    name: Deploy s3-trigger Lambda
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Build
+        run: sam build S3TriggerFunction --template template.yaml --use-container
+
+      - name: Deploy
+        uses: aws-actions/aws-lambda-deploy@v1
+        with:
+          function-name: lectureclip-s3-trigger
+          code-artifacts-dir: .aws-sam/build/S3TriggerFunction
+          handler: index.handler
+          runtime: python3.13
+
+  deploy-start-transcribe:
+    name: Deploy start-transcribe Lambda
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Build
+        run: sam build StartTranscribeFunction --template template.yaml --use-container
+
+      - name: Deploy
+        uses: aws-actions/aws-lambda-deploy@v1
+        with:
+          function-name: lectureclip-start-transcribe
+          code-artifacts-dir: .aws-sam/build/StartTranscribeFunction
+          handler: index.handler
+          runtime: python3.13
+
+  deploy-process-transcribe:
+    name: Deploy process-transcribe Lambda
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Build
+        run: sam build ProcessTranscribeFunction --template template.yaml --use-container
+
+      - name: Deploy
+        uses: aws-actions/aws-lambda-deploy@v1
+        with:
+          function-name: lectureclip-process-transcribe
+          code-artifacts-dir: .aws-sam/build/ProcessTranscribeFunction
+          handler: index.handler
+          runtime: python3.13
