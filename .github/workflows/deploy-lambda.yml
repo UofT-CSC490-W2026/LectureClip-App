@@ -184,3 +184,32 @@ jobs:
           code-artifacts-dir: .aws-sam/build/ProcessTranscribeFunction
           handler: index.handler
           runtime: python3.13
+
+  deploy-process-results:
+    name: Deploy process-results Lambda
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Build
+        run: sam build ProcessResultsFunction --template template.yaml --use-container
+
+      - name: Deploy
+        uses: aws-actions/aws-lambda-deploy@v1
+        with:
+          function-name: lectureclip-process-results
+          code-artifacts-dir: .aws-sam/build/ProcessResultsFunction
+          handler: index.handler
+          runtime: python3.13

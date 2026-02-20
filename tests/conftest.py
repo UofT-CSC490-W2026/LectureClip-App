@@ -23,6 +23,15 @@ _PROCESS_TRANSCRIBE_DIR = os.path.join(
 )
 if _PROCESS_TRANSCRIBE_DIR not in sys.path:
     sys.path.insert(0, _PROCESS_TRANSCRIBE_DIR)
+
+# process-results imports transcribe_utils and bedrock_utils as sibling modules.
+_PROCESS_RESULTS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "src", "lambdas", "process-results",
+)
+if _PROCESS_RESULTS_DIR not in sys.path:
+    sys.path.insert(0, _PROCESS_RESULTS_DIR)
+
 os.environ.setdefault("STATE_MACHINE_ARN", "arn:aws:states:us-east-1:123456789012:stateMachine:TestMachine")
 os.environ.setdefault("TRANSCRIBE_TABLE", "test-transcribe-table")
 os.environ.setdefault("TRANSCRIPTS_BUCKET", "test-transcripts-bucket")

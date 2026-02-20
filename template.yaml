@@ -81,3 +81,14 @@ Resources:
       Environment:
         Variables:
           TRANSCRIBE_TABLE: !Ref TranscribeTable
+
+  ProcessResultsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: lectureclip-process-results
+      Handler: index.handler
+      CodeUri: src/lambdas/process-results/
+      Timeout: 900
+      # Env vars (AURORA_CLUSTER_ARN, AURORA_SECRET_ARN, EMBEDDING_MODEL_ID,
+      # EMBEDDING_DIM) are injected by Terraform; requires real Bedrock and
+      # Aurora — not suitable for sam local invoke.
