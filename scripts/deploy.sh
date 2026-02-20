@@ -65,6 +65,7 @@ ALL_FUNCTIONS=(
   "s3-trigger|S3TriggerFunction|lectureclip-s3-trigger"
   "start-transcribe|StartTranscribeFunction|lectureclip-start-transcribe"
   "process-transcribe|ProcessTranscribeFunction|lectureclip-process-transcribe"
+  "process-results|ProcessResultsFunction|lectureclip-process-results"
 )
 
 # ── filter to requested function ──────────────────────────────────────────────
@@ -77,7 +78,7 @@ for entry in "${ALL_FUNCTIONS[@]}"; do
   fi
 done
 
-[[ ${#FUNCTIONS_TO_DEPLOY[@]} -eq 0 ]] && err "unknown function '$FILTER_FUNCTION'. Choose: video-upload | multipart-init | multipart-complete | s3-trigger | start-transcribe | process-transcribe"
+[[ ${#FUNCTIONS_TO_DEPLOY[@]} -eq 0 ]] && err "unknown function '$FILTER_FUNCTION'. Choose: video-upload | multipart-init | multipart-complete | s3-trigger | start-transcribe | process-transcribe | process-results"
 
 # ── summary ───────────────────────────────────────────────────────────────────
 
