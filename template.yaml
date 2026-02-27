@@ -12,6 +12,12 @@ Globals:
         REGION: !Ref AWS::Region
 
 Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, prod]
+    Description: Deployment environment — controls the lectureclip-{env}-* function name prefix
+
   BucketName:
     Type: String
     Default: lectureclip-user-videos-local
@@ -31,28 +37,28 @@ Resources:
   VideoUploadFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: lectureclip-video-upload
+      FunctionName: !Sub "lectureclip-${Environment}-video-upload"
       Handler: index.handler
       CodeUri: src/lambdas/video-upload/
 
   MultipartInitFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: lectureclip-multipart-init
+      FunctionName: !Sub "lectureclip-${Environment}-multipart-init"
       Handler: index.handler
       CodeUri: src/lambdas/multipart-init/
 
   MultipartCompleteFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: lectureclip-multipart-complete
+      FunctionName: !Sub "lectureclip-${Environment}-multipart-complete"
       Handler: index.handler
       CodeUri: src/lambdas/multipart-complete/
 
   S3TriggerFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: lectureclip-s3-trigger
+      FunctionName: !Sub "lectureclip-${Environment}-s3-trigger"
       Handler: index.handler
       CodeUri: src/lambdas/s3-trigger/
       Environment:
@@ -62,7 +68,7 @@ Resources:
   StartTranscribeFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: lectureclip-start-transcribe
+      FunctionName: !Sub "lectureclip-${Environment}-start-transcribe"
       Handler: index.handler
       CodeUri: src/lambdas/start-transcribe/
       Timeout: 60
@@ -74,7 +80,7 @@ Resources:
   ProcessTranscribeFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: lectureclip-process-transcribe
+      FunctionName: !Sub "lectureclip-${Environment}-process-transcribe"
       Handler: index.handler
       CodeUri: src/lambdas/process-transcribe/
       Timeout: 60
@@ -85,7 +91,7 @@ Resources:
   ProcessResultsFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: lectureclip-process-results
+      FunctionName: !Sub "lectureclip-${Environment}-process-results"
       Handler: index.handler
       CodeUri: src/lambdas/process-results/
       Timeout: 900
