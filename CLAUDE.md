@@ -74,18 +74,21 @@ Sample event payloads live in `events/`. There is currently no `events/multipart
 
 ## Deployment
 
-CI/CD deploys automatically on push to `main` when files under `lambdas/` change (`.github/workflows/deploy-lambda.yml`). Each Lambda is deployed independently. Required GitHub Actions variables: `AWS_REGION`, `AWS_ROLE_TO_ASSUME`, `AWS_ACCOUNT_ID`.
+CI/CD deploys automatically when files under `src/lambdas/` change (`.github/workflows/deploy-lambda.yml`). Branch determines target environment: `develop` → dev, `main` → prod. Each Lambda is deployed independently. Required GitHub Actions variables: `AWS_REGION`, `AWS_ROLE_TO_ASSUME_DEV`, `AWS_ROLE_TO_ASSUME_PROD`.
+
+Lambda function names follow the pattern `lectureclip-{env}-{function}` (e.g. `lectureclip-dev-video-upload`).
 
 Manual deployment:
 ```bash
-# Deploy all functions
+# Deploy all functions to dev (default)
 ./scripts/deploy.sh
 
-# Deploy a single function
-./scripts/deploy.sh --function video-upload
+# Deploy all functions to prod
+./scripts/deploy.sh --env prod
 
-# Deploy to a specific bucket/region
-./scripts/deploy.sh --bucket lectureclip-lambda-artifacts-123456789 --region us-east-1
+# Deploy a single function to dev
+./scripts/deploy.sh --env dev --function video-upload
+
+# Deploy to a specific region
+./scripts/deploy.sh --env prod --region us-east-1
 ```
-
-The deploy script resolves the artifacts bucket as `lectureclip-lambda-artifacts-{AWS_ACCOUNT_ID}`.

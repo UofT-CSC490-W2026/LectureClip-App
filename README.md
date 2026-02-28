@@ -228,12 +228,12 @@ def test_something(mock_s3):
    MyNewFunction:
      Type: AWS::Serverless::Function
      Properties:
-       FunctionName: lectureclip-my-new-function
+       FunctionName: !Sub "lectureclip-${Environment}-my-new-function"
        Handler: index.handler
        CodeUri: src/lambdas/my-new-function/
    ```
 
-   The `Globals` block already sets `Runtime: python3.13`, `Timeout: 30`, and injects `BUCKET_NAME` / `REGION` as environment variables — no need to repeat those.
+   The `Globals` block already sets `Runtime: python3.13`, `Timeout: 30`, and injects `BUCKET_NAME` / `REGION` as environment variables — no need to repeat those. The `Environment` SAM parameter is set to `dev` or `prod` at build time.
 
 3. **Add a sample event payload:**
 
@@ -244,8 +244,10 @@ def test_something(mock_s3):
 4. **Register it in `scripts/deploy.sh`** by adding an entry to `ALL_FUNCTIONS`:
 
    ```bash
-   "my-new-function|MyNewFunction|lectureclip-my-new-function|src/lambdas/my-new-function/my_new_function.zip"
+   "my-new-function|MyNewFunction"
    ```
+
+   The Lambda function name is derived automatically as `lectureclip-{env}-my-new-function` at deploy time.
 
 5. **Register it in `scripts/invoke-local.sh`** by adding a case in the function resolver:
 
@@ -256,7 +258,7 @@ def test_something(mock_s3):
      ;;
    ```
 
-6. **Add a deploy job to `.github/workflows/deploy-lambda.yml`** following the pattern of the existing jobs (checkout → configure AWS credentials → SAM setup → `sam build MyNewFunction` → `aws-lambda-deploy`).
+6. **Add a deploy job to `.github/workflows/deploy-lambda.yml`** following the pattern of the existing jobs: add `needs: resolve-env`, use `needs.resolve-env.outputs.role` for the IAM role, and set the function name to `lectureclip-${{ needs.resolve-env.outputs.env_name }}-my-new-function`.
 
 7. **Add tests in `tests/`** — create `tests/test_my_new_function.py` following the pattern of the existing test files: load the handler with `load_lambda("my-new-function")`, patch `s3_client`, and call `mod.handler(make_event({...}), {})`.
 
@@ -277,35 +279,36 @@ export AWS_PROFILE=<your-profile-name>
 
 ### Automated (CI/CD)
 
-Pushing to `main` with changes under `src/` triggers `.github/workflows/deploy-lambda.yml`. Each Lambda is built and deployed in a separate parallel job.
+Pushing to `main` or `develop` with changes under `src/lambdas/` triggers `.github/workflows/deploy-lambda.yml`. A `resolve-env` job maps the branch to the target environment (`develop` → dev, `main` → prod), then each Lambda is built and deployed in a separate parallel job using the appropriate role and the `lectureclip-{env}-{function}` naming convention.
 
 Required GitHub Actions variables (set under Settings → Variables):
 
 | Variable | Description |
 |----------|-------------|
 | `AWS_REGION` | e.g. `ca-central-1` |
-| `AWS_ROLE_TO_ASSUME` | IAM role ARN for OIDC federation |
+| `AWS_ROLE_TO_ASSUME_DEV` | IAM role ARN for OIDC federation (dev environment) |
+| `AWS_ROLE_TO_ASSUME_PROD` | IAM role ARN for OIDC federation (prod environment) |
 
 ### Manual
 
 ```bash
-# Deploy all three functions
+# Deploy all functions to dev (default)
 ./scripts/deploy.sh
 
-# Deploy a single function
-./scripts/deploy.sh --function video-upload
+# Deploy all functions to prod
+./scripts/deploy.sh --env prod
 
-# Override bucket or region
-./scripts/deploy.sh --bucket lectureclip-lambda-artifacts-123456789 --region us-east-1
+# Deploy a single function
+./scripts/deploy.sh --env dev --function video-upload
+
+# Override region
+./scripts/deploy.sh --env prod --region us-east-1
 
 # Use a specific AWS profile
-AWS_PROFILE=dev ./scripts/deploy.sh --function multipart-init
+AWS_PROFILE=prod ./scripts/deploy.sh --env prod --function multipart-init
 ```
 
 The deploy script:
-1. Runs `sam build` (installs any `requirements.txt` into the build artifact)
+1. Runs `sam build --parameter-overrides Environment={env}` (installs any `requirements.txt` into the build artifact)
 2. Zips the build output
-3. Uploads the zip to `s3://lectureclip-lambda-artifacts-{ACCOUNT_ID}/lambdas/{function}/{function}.zip`
-4. Calls `aws lambda update-function-code` and waits for the update to propagate
-
-The artifacts bucket name is auto-resolved from `aws sts get-caller-identity` if `--bucket` is not provided.
+3. Calls `aws lambda update-function-code --zip-file` directly to `lectureclip-{env}-{function}` and waits for the update to propagate

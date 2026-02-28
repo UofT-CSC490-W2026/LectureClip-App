@@ -2,18 +2,41 @@ name: Deploy Lambda
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
     paths:
       - 'src/lambdas/**'
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
-  AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
 
 jobs:
-  deploy-video-upload:
-    name: Deploy video-upload Lambda
+  # ==========================================================================
+  # ENVIRONMENT RESOLUTION — branch determines target environment
+  #   develop → dev
+  #   main    → prod
+  # ==========================================================================
+  resolve-env:
+    name: Resolve Environment
     runs-on: ubuntu-latest
+    outputs:
+      env_name: ${{ steps.env.outputs.name }}
+      role: ${{ steps.env.outputs.role }}
+    steps:
+      - name: Resolve environment
+        id: env
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "name=prod" >> "$GITHUB_OUTPUT"
+            echo "role=${{ vars.AWS_ROLE_TO_ASSUME_PROD }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=dev"  >> "$GITHUB_OUTPUT"
+            echo "role=${{ vars.AWS_ROLE_TO_ASSUME_DEV }}" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy-video-upload:
+    name: Deploy video-upload Lambda (${{ needs.resolve-env.outputs.env_name }})
+    runs-on: ubuntu-latest
+    needs: resolve-env
     permissions:
       contents: read
       id-token: write
@@ -22,7 +45,7 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ needs.resolve-env.outputs.role }}
           aws-region: ${{ env.AWS_REGION }}
 
       - uses: aws-actions/setup-sam@v2
@@ -35,14 +58,15 @@ jobs:
       - name: Deploy
         uses: aws-actions/aws-lambda-deploy@v1
         with:
-          function-name: lectureclip-video-upload
+          function-name: lectureclip-${{ needs.resolve-env.outputs.env_name }}-video-upload
           code-artifacts-dir: .aws-sam/build/VideoUploadFunction
           handler: index.handler
           runtime: python3.13
 
   deploy-multipart-init:
-    name: Deploy multipart-init Lambda
+    name: Deploy multipart-init Lambda (${{ needs.resolve-env.outputs.env_name }})
     runs-on: ubuntu-latest
+    needs: resolve-env
     permissions:
       contents: read
       id-token: write
@@ -51,7 +75,7 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ needs.resolve-env.outputs.role }}
           aws-region: ${{ env.AWS_REGION }}
 
       - uses: aws-actions/setup-sam@v2
@@ -64,14 +88,15 @@ jobs:
       - name: Deploy
         uses: aws-actions/aws-lambda-deploy@v1
         with:
-          function-name: lectureclip-multipart-init
+          function-name: lectureclip-${{ needs.resolve-env.outputs.env_name }}-multipart-init
           code-artifacts-dir: .aws-sam/build/MultipartInitFunction
           handler: index.handler
           runtime: python3.13
 
   deploy-multipart-complete:
-    name: Deploy multipart-complete Lambda
+    name: Deploy multipart-complete Lambda (${{ needs.resolve-env.outputs.env_name }})
     runs-on: ubuntu-latest
+    needs: resolve-env
     permissions:
       contents: read
       id-token: write
@@ -80,7 +105,7 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ needs.resolve-env.outputs.role }}
           aws-region: ${{ env.AWS_REGION }}
 
       - uses: aws-actions/setup-sam@v2
@@ -93,14 +118,15 @@ jobs:
       - name: Deploy
         uses: aws-actions/aws-lambda-deploy@v1
         with:
-          function-name: lectureclip-multipart-complete
+          function-name: lectureclip-${{ needs.resolve-env.outputs.env_name }}-multipart-complete
           code-artifacts-dir: .aws-sam/build/MultipartCompleteFunction
           handler: index.handler
           runtime: python3.13
 
   deploy-s3-trigger:
-    name: Deploy s3-trigger Lambda
+    name: Deploy s3-trigger Lambda (${{ needs.resolve-env.outputs.env_name }})
     runs-on: ubuntu-latest
+    needs: resolve-env
     permissions:
       contents: read
       id-token: write
@@ -109,7 +135,7 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ needs.resolve-env.outputs.role }}
           aws-region: ${{ env.AWS_REGION }}
 
       - uses: aws-actions/setup-sam@v2
@@ -122,14 +148,15 @@ jobs:
       - name: Deploy
         uses: aws-actions/aws-lambda-deploy@v1
         with:
-          function-name: lectureclip-s3-trigger
+          function-name: lectureclip-${{ needs.resolve-env.outputs.env_name }}-s3-trigger
           code-artifacts-dir: .aws-sam/build/S3TriggerFunction
           handler: index.handler
           runtime: python3.13
 
   deploy-start-transcribe:
-    name: Deploy start-transcribe Lambda
+    name: Deploy start-transcribe Lambda (${{ needs.resolve-env.outputs.env_name }})
     runs-on: ubuntu-latest
+    needs: resolve-env
     permissions:
       contents: read
       id-token: write
@@ -138,7 +165,7 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ needs.resolve-env.outputs.role }}
           aws-region: ${{ env.AWS_REGION }}
 
       - uses: aws-actions/setup-sam@v2
@@ -151,14 +178,15 @@ jobs:
       - name: Deploy
         uses: aws-actions/aws-lambda-deploy@v1
         with:
-          function-name: lectureclip-start-transcribe
+          function-name: lectureclip-${{ needs.resolve-env.outputs.env_name }}-start-transcribe
           code-artifacts-dir: .aws-sam/build/StartTranscribeFunction
           handler: index.handler
           runtime: python3.13
 
   deploy-process-transcribe:
-    name: Deploy process-transcribe Lambda
+    name: Deploy process-transcribe Lambda (${{ needs.resolve-env.outputs.env_name }})
     runs-on: ubuntu-latest
+    needs: resolve-env
     permissions:
       contents: read
       id-token: write
@@ -167,7 +195,7 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ needs.resolve-env.outputs.role }}
           aws-region: ${{ env.AWS_REGION }}
 
       - uses: aws-actions/setup-sam@v2
@@ -180,14 +208,15 @@ jobs:
       - name: Deploy
         uses: aws-actions/aws-lambda-deploy@v1
         with:
-          function-name: lectureclip-process-transcribe
+          function-name: lectureclip-${{ needs.resolve-env.outputs.env_name }}-process-transcribe
           code-artifacts-dir: .aws-sam/build/ProcessTranscribeFunction
           handler: index.handler
           runtime: python3.13
 
   deploy-process-results:
-    name: Deploy process-results Lambda
+    name: Deploy process-results Lambda (${{ needs.resolve-env.outputs.env_name }})
     runs-on: ubuntu-latest
+    needs: resolve-env
     permissions:
       contents: read
       id-token: write
@@ -196,7 +225,7 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ needs.resolve-env.outputs.role }}
           aws-region: ${{ env.AWS_REGION }}
 
       - uses: aws-actions/setup-sam@v2
@@ -209,7 +238,7 @@ jobs:
       - name: Deploy
         uses: aws-actions/aws-lambda-deploy@v1
         with:
-          function-name: lectureclip-process-results
+          function-name: lectureclip-${{ needs.resolve-env.outputs.env_name }}-process-results
           code-artifacts-dir: .aws-sam/build/ProcessResultsFunction
           handler: index.handler
           runtime: python3.13
