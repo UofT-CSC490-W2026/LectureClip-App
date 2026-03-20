@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { uploadVideo } from '../lib/api'
 
 type UploadPageProps = {
-  onUploadComplete: (videoId: string) => void
+  onUploadComplete: (videoId: string, file: File) => void
 }
 
 export function UploadPage({ onUploadComplete }: UploadPageProps) {
@@ -17,7 +17,7 @@ export function UploadPage({ onUploadComplete }: UploadPageProps) {
 
     try {
       const { videoId } = await uploadVideo(file)
-      onUploadComplete(videoId)
+      onUploadComplete(videoId, file)
     } finally {
       setIsUploading(false)
     }

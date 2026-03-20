@@ -7,18 +7,45 @@ type VideoPlayerProps = {
 }
 
 function formatTime(seconds: number) {
-  const minutes = Math.floor(seconds / 60)
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
   const remainingSeconds = Math.floor(seconds % 60)
-  return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
+  return [
+    hours.toString().padStart(2, '0'),
+    minutes.toString().padStart(2, '0'),
+    remainingSeconds.toString().padStart(2, '0'),
+  ].join(':')
 }
 
 export function VideoPlayer({ src, segments }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
-  const [currentSegmentIndex, setCurrentSegmentIndex] = useState(0)
+  const programmaticSeekTargetRef = useRef<number | null>(null)
+  const currentSegmentIndexRef = useRef<number | null>(segments.length > 0 ? 0 : null)
+  const playbackModeRef = useRef<'segments' | 'free'>('segments')
+  const [currentSegmentIndex, setCurrentSegmentIndex] = useState<number | null>(
+    segments.length > 0 ? 0 : null,
+  )
+  const [, setPlaybackMode] = useState<'segments' | 'free'>('segments')
+
+  function updateCurrentSegmentIndex(index: number | null) {
+    currentSegmentIndexRef.current = index
+    setCurrentSegmentIndex(index)
+  }
+
+  function updatePlaybackMode(mode: 'segments' | 'free') {
+    playbackModeRef.current = mode
+    setPlaybackMode(mode)
+  }
 
   useEffect(() => {
-    setCurrentSegmentIndex(0)
+    updateCurrentSegmentIndex(segments.length > 0 ? 0 : null)
+    updatePlaybackMode('segments')
+    programmaticSeekTargetRef.current = null
   }, [src, segments])
+
+  function getSegmentIndexForTime(time: number) {
+    return segments.findIndex((segment) => time >= segment.start && time < segment.end)
+  }
 
   function startSegment(index: number) {
     const video = videoRef.current
@@ -26,29 +53,53 @@ export function VideoPlayer({ src, segments }: VideoPlayerProps) {
 
     if (!video || !segment) return
 
-    setCurrentSegmentIndex(index)
+    updatePlaybackMode('segments')
+    updateCurrentSegmentIndex(index)
+    programmaticSeekTargetRef.current = segment.start
     video.currentTime = segment.start
     void video.play()
   }
 
   function handleLoadedMetadata() {
+    if (segments.length === 0) return
     startSegment(0)
+  }
+
+  function handleSeeking() {
+    const video = videoRef.current
+
+    if (!video) return
+
+    const programmaticSeekTarget = programmaticSeekTargetRef.current
+
+    if (
+      programmaticSeekTarget !== null &&
+      Math.abs(video.currentTime - programmaticSeekTarget) < 0.25
+    ) {
+      programmaticSeekTargetRef.current = null
+      return
+    }
+
+    programmaticSeekTargetRef.current = null
+    updatePlaybackMode('free')
+    updateCurrentSegmentIndex(getSegmentIndexForTime(video.currentTime))
   }
 
   function handleTimeUpdate() {
     const video = videoRef.current
-    const segment = segments[currentSegmentIndex]
+    if (!video) return
 
-    if (!video || !segment) return
-
-    if (video.currentTime < segment.start) {
-      video.currentTime = segment.start
-      return
+    const activeSegmentIndex = getSegmentIndexForTime(video.currentTime)
+    if (activeSegmentIndex !== currentSegmentIndexRef.current) {
+      updateCurrentSegmentIndex(activeSegmentIndex)
     }
 
-    if (video.currentTime < segment.end) return
+    if (playbackModeRef.current !== 'segments' || currentSegmentIndexRef.current === null) return
 
-    const nextIndex = currentSegmentIndex + 1
+    const segment = segments[currentSegmentIndexRef.current]
+    if (!segment || video.currentTime < segment.end) return
+
+    const nextIndex = currentSegmentIndexRef.current + 1
 
     if (nextIndex >= segments.length) {
       video.pause()
@@ -67,22 +118,30 @@ export function VideoPlayer({ src, segments }: VideoPlayerProps) {
         controls
         autoPlay
         onLoadedMetadata={handleLoadedMetadata}
+        onSeeking={handleSeeking}
         onTimeUpdate={handleTimeUpdate}
       />
 
       <p className="segment-meta">
-        Segment {currentSegmentIndex + 1} of {segments.length}
+        {currentSegmentIndex === null
+          ? 'Current position is outside the highlighted segments.'
+          : `Segment ${currentSegmentIndex + 1} of ${segments.length}`}
       </p>
 
       <div>
         <h3>Segments</h3>
         <ul className="segment-list">
           {segments.map((segment, index) => (
-            <li key={`${segment.start}-${segment.end}`} className={index === currentSegmentIndex ? 'active' : ''}>
-              <span>Segment {index + 1}</span>
-              <span>
-                {formatTime(segment.start)} - {formatTime(segment.end)}
-              </span>
+            <li
+              key={`${segment.start}-${segment.end}`}
+              className={index === currentSegmentIndex ? 'active' : ''}
+            >
+              <button type="button" className="segment-button" onClick={() => startSegment(index)}>
+                <span>Segment {index + 1}</span>
+                <span>
+                  {formatTime(segment.start)} - {formatTime(segment.end)}
+                </span>
+              </button>
             </li>
           ))}
         </ul>

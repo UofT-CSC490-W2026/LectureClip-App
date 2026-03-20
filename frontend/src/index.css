@@ -137,13 +137,31 @@ button {
 }
 
 .segment-list li {
+  overflow: hidden;
+  border-radius: 10px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+}
+
+.segment-button {
+  width: 100%;
   display: flex;
   justify-content: space-between;
   gap: 12px;
   padding: 10px 12px;
-  border-radius: 10px;
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.segment-button:hover {
+  background: #f3f4f6;
+}
+
+.segment-button:focus-visible {
+  outline: 2px solid #4f46e5;
+  outline-offset: -2px;
 }
 
 .segment-list li.active {
@@ -156,7 +174,7 @@ button {
     padding: 20px;
   }
 
-  .segment-list li {
+  .segment-button {
     flex-direction: column;
   }
 }
