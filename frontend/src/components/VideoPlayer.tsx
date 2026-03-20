@@ -1,9 +1,13 @@
-import { useEffect, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import type { Segment } from '../lib/types'
 
 type VideoPlayerProps = {
   src: string
   segments: Segment[]
+}
+
+export type VideoPlayerHandle = {
+  pause: () => void
 }
 
 function formatTime(seconds: number) {
@@ -17,7 +21,10 @@ function formatTime(seconds: number) {
   ].join(':')
 }
 
-export function VideoPlayer({ src, segments }: VideoPlayerProps) {
+export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(function VideoPlayer(
+  { src, segments },
+  ref,
+) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const programmaticSeekTargetRef = useRef<number | null>(null)
   const currentSegmentIndexRef = useRef<number | null>(segments.length > 0 ? 0 : null)
@@ -36,6 +43,12 @@ export function VideoPlayer({ src, segments }: VideoPlayerProps) {
     playbackModeRef.current = mode
     setPlaybackMode(mode)
   }
+
+  useImperativeHandle(ref, () => ({
+    pause() {
+      videoRef.current?.pause()
+    },
+  }))
 
   useEffect(() => {
     updateCurrentSegmentIndex(segments.length > 0 ? 0 : null)
@@ -148,4 +161,4 @@ export function VideoPlayer({ src, segments }: VideoPlayerProps) {
       </div>
     </div>
   )
-}
+})

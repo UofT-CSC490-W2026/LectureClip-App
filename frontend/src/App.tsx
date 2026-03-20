@@ -12,6 +12,13 @@ function App() {
   function handleUploadComplete(nextVideoId: string, file: File) {
     setVideoId(nextVideoId)
     setVideoFile(file)
+    setSegments([])
+  }
+
+  function handleResetFlow() {
+    setVideoId(null)
+    setVideoFile(null)
+    setSegments([])
   }
 
   return (
@@ -27,7 +34,13 @@ function App() {
           <QueryPage videoId={videoId} onQueryComplete={setSegments} />
         )}
         {videoId && videoFile && segments.length > 0 && (
-          <PlayerPage videoId={videoId} file={videoFile} segments={segments} />
+          <PlayerPage
+            videoId={videoId}
+            file={videoFile}
+            segments={segments}
+            onQueryComplete={setSegments}
+            onBackToUpload={handleResetFlow}
+          />
         )}
       </div>
     </main>

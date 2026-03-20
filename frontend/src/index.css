@@ -104,9 +104,24 @@ button {
   color: #ffffff;
 }
 
+.secondary-button {
+  width: fit-content;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 12px 18px;
+  background: #ffffff;
+  color: #111827;
+}
+
 .primary-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .video-player {
