@@ -95,6 +95,17 @@ Resources:
       Handler: index.handler
       CodeUri: src/lambdas/process-results/
       Timeout: 900
-      # Env vars (AURORA_CLUSTER_ARN, AURORA_SECRET_ARN, EMBEDDING_MODEL_ID,
-      # EMBEDDING_DIM) are injected by Terraform; requires real Bedrock and
-      # Aurora — not suitable for sam local invoke.
+      # Env vars (AURORA_CLUSTER_ARN, AURORA_SECRET_ARN, AURORA_DB_NAME,
+      # EMBEDDING_MODEL_ID, EMBEDDING_DIM) are injected by Terraform; requires
+      # real Bedrock and Aurora — not suitable for sam local invoke.
+
+  DbMigrateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "lectureclip-${Environment}-db-migrate"
+      Handler: index.handler
+      CodeUri: src/lambdas/db-migrate/
+      Timeout: 300
+      # Env vars (AURORA_CLUSTER_ARN, AURORA_SECRET_ARN, AURORA_DB_NAME)
+      # are injected by Terraform. Invoked once by CI after each deployment
+      # (scripts/deploy.sh) — not suitable for sam local invoke.

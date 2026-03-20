@@ -3,6 +3,7 @@ import os
 
 from transcript_utils import fetch_and_parse_transcript
 from bedrock_utils import generate_text_embeddings
+from aurora_utils import upsert_lecture, insert_segments, insert_embeddings
 
 EMBEDDING_MODEL_ID = os.environ.get("EMBEDDING_MODEL_ID", "amazon.titan-embed-text-v2:0")
 EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "1024"))
@@ -10,16 +11,13 @@ EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "1024"))
 
 def handler(event, context):
     """
-    Generate text embeddings from an Amazon Transcribe transcript.
+    Generate text embeddings from an Amazon Transcribe transcript and persist
+    them to Aurora PostgreSQL via the RDS Data API.
 
     Expected event keys (provided by Step Functions after process-transcribe
     signals task success):
         transcriptUrl  — HTTPS URL of the Transcribe JSON output on S3
-        mediaUrl       — S3 URI of the source video (used as source metadata)
-
-    Embeddings are generated via Bedrock (Titan Embed Text v2) but are not
-    yet persisted; database storage will be added in a future iteration.
-    Only summary counts are returned so the Step Functions state stays small.
+        mediaUrl       — S3 URI of the source video (used as the lecture video_uri)
     """
     print("Event:", json.dumps(event))
 
@@ -40,16 +38,18 @@ def handler(event, context):
     )
     print(f"Generated {len(embeddings)} embeddings")
 
-    if embeddings:
-        sample = embeddings[0]
-        print(
-            f"Sample — speaker: {sample['speaker']}, "
-            f"dim: {len(sample['embedding'])}, "
-            f"text[:80]: {sample['text'][:80]!r}"
-        )
+    lecture_id = upsert_lecture(media_uri)
+    print(f"Upserted lecture {lecture_id}")
+
+    segment_records = insert_segments(lecture_id, segments)
+    print(f"Upserted {len(segment_records)} segments")
+
+    insert_embeddings(segment_records, embeddings, EMBEDDING_MODEL_ID)
+    print(f"Inserted {len(embeddings)} embedding vectors")
 
     return {
         "statusCode":     200,
+        "lectureId":      lecture_id,
         "segmentCount":   len(segments),
         "embeddingCount": len(embeddings),
     }

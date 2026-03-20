@@ -242,3 +242,51 @@ jobs:
           code-artifacts-dir: .aws-sam/build/ProcessResultsFunction
           handler: index.handler
           runtime: python3.13
+
+  deploy-db-migrate:
+    name: Deploy db-migrate Lambda (${{ needs.resolve-env.outputs.env_name }})
+    runs-on: ubuntu-latest
+    needs: resolve-env
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ needs.resolve-env.outputs.role }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Build
+        run: sam build DbMigrateFunction --template template.yaml --use-container
+
+      - name: Deploy
+        uses: aws-actions/aws-lambda-deploy@v1
+        with:
+          function-name: lectureclip-${{ needs.resolve-env.outputs.env_name }}-db-migrate
+          code-artifacts-dir: .aws-sam/build/DbMigrateFunction
+          handler: index.handler
+          runtime: python3.13
+
+      - name: Run migration
+        run: |
+          aws lambda invoke \
+            --function-name "lectureclip-${{ needs.resolve-env.outputs.env_name }}-db-migrate" \
+            --invocation-type RequestResponse \
+            --region "${{ env.AWS_REGION }}" \
+            --output json \
+            --payload '{}' \
+            response.json > invoke_meta.json
+
+          if grep -q '"FunctionError"' invoke_meta.json; then
+            echo "db-migrate Lambda reported a function error — schema migration failed:"
+            cat response.json
+            exit 1
+          fi
+
+          echo "db-migrate response: $(cat response.json)"

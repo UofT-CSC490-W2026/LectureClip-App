@@ -4,6 +4,9 @@
 # SAM builds each function (installs requirements.txt), zips the output,
 # and calls update-function-code with --zip-file. No S3 bucket required.
 #
+# After deploying db-migrate, the script automatically invokes it
+# synchronously to apply any pending schema changes to Aurora.
+#
 # Usage:
 #   ./scripts/deploy.sh [--env <dev|prod>] [--function <name>] [--region <region>]
 #
@@ -19,11 +22,13 @@
 #   start-transcribe
 #   process-transcribe
 #   process-results
+#   db-migrate
 #
 # Prerequisites:
 #   - AWS SAM CLI  (sam build requires Docker or --use-container)
 #   - AWS CLI with credentials that have:
 #       lambda:UpdateFunctionCode on lectureclip-{env}-* functions
+#       lambda:InvokeFunction     on lectureclip-{env}-db-migrate
 #
 # Examples:
 #   ./scripts/deploy.sh
@@ -77,6 +82,7 @@ ALL_FUNCTIONS=(
   "start-transcribe|StartTranscribeFunction"
   "process-transcribe|ProcessTranscribeFunction"
   "process-results|ProcessResultsFunction"
+  "db-migrate|DbMigrateFunction"
 )
 
 # ── filter to requested function ──────────────────────────────────────────────
@@ -89,7 +95,7 @@ for entry in "${ALL_FUNCTIONS[@]}"; do
   fi
 done
 
-[[ ${#FUNCTIONS_TO_DEPLOY[@]} -eq 0 ]] && err "unknown function '$FILTER_FUNCTION'. Choose: video-upload | multipart-init | multipart-complete | s3-trigger | start-transcribe | process-transcribe | process-results"
+[[ ${#FUNCTIONS_TO_DEPLOY[@]} -eq 0 ]] && err "unknown function '$FILTER_FUNCTION'. Choose: video-upload | multipart-init | multipart-complete | s3-trigger | start-transcribe | process-transcribe | process-results | db-migrate"
 
 # ── summary ───────────────────────────────────────────────────────────────────
 
@@ -149,6 +155,38 @@ for entry in "${FUNCTIONS_TO_DEPLOY[@]}"; do
 
   log "done ✓"
 done
+
+# ── run db-migrate if it was deployed ────────────────────────────────────────
+# db-migrate is idempotent (all DDL uses IF NOT EXISTS) so invoking it on
+# every deploy is safe and ensures the schema is always up to date.
+
+DB_MIGRATE_DEPLOYED=false
+for entry in "${FUNCTIONS_TO_DEPLOY[@]}"; do
+  [[ "${entry%%|*}" == "db-migrate" ]] && DB_MIGRATE_DEPLOYED=true && break
+done
+
+if [[ "$DB_MIGRATE_DEPLOYED" == "true" ]]; then
+  step "invoking db-migrate"
+  RESPONSE_FILE="/tmp/db-migrate-response-$(date +%s).json"
+  INVOKE_META=$(aws lambda invoke \
+    --function-name "lectureclip-${ENV}-db-migrate" \
+    --invocation-type RequestResponse \
+    --region "$REGION" \
+    --output json \
+    --payload '{}' \
+    "$RESPONSE_FILE" 2>&1)
+
+  if echo "$INVOKE_META" | grep -q '"FunctionError"'; then
+    log "db-migrate response:"
+    cat "$RESPONSE_FILE" >&2
+    rm -f "$RESPONSE_FILE"
+    err "db-migrate Lambda reported a function error — schema migration failed"
+  fi
+
+  log "db-migrate response: $(cat "$RESPONSE_FILE")"
+  rm -f "$RESPONSE_FILE"
+  log "done ✓"
+fi
 
 echo ""
 echo "  Deploy complete."
