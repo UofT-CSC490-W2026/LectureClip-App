@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { queryVideo } from '@/lib/api'
-import type { Segment } from '@/lib/types'
+import { queryVideo } from '@/lib/api.ts'
+import type { Segment } from '@/lib/types.ts'
 
 type QueryPageProps = {
   videoId: string
