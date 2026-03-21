@@ -23,6 +23,9 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+    },
     coverage,
   },
 })
