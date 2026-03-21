@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { PlayerPage } from './pages/PlayerPage'
-import { QueryPage } from './pages/QueryPage'
-import { UploadPage } from './pages/UploadPage'
-import type { Segment } from './lib/types'
+import { PlayerPage } from './pages/PlayerPage.tsx'
+import { QueryPage } from './pages/QueryPage.tsx'
+import { UploadPage } from './pages/UploadPage.tsx'
+import type { Segment } from './lib/types.ts'
 
 function App() {
   const [videoId, setVideoId] = useState<string | null>(null)
