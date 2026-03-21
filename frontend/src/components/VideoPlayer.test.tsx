@@ -2,8 +2,8 @@ import { createRef } from 'react'
 import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { VideoPlayer } from './VideoPlayer'
-import type { VideoPlayerHandle } from './VideoPlayer'
+import { VideoPlayer } from '@/components/VideoPlayer'
+import type { VideoPlayerHandle } from '@/components/VideoPlayer'
 
 const segments = [
   { start: 5, end: 10 },

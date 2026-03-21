@@ -1,10 +1,10 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { queryVideo } from '../lib/api'
-import { QueryPage } from './QueryPage'
+import { queryVideo } from '@/lib/api'
+import { QueryPage } from '@/pages/QueryPage'
 
-vi.mock('../lib/api', () => ({
+vi.mock('@/lib/api', () => ({
   queryVideo: vi.fn(),
 }))
 

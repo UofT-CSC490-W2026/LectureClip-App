@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { VideoPlayer } from '../components/VideoPlayer.tsx'
-import type { VideoPlayerHandle } from '../components/VideoPlayer.tsx'
-import { getTranscript, queryVideo } from '../lib/api'
-import type { Segment, TranscriptSegment, Video } from '../lib/types'
+import { VideoPlayer } from '@/components/VideoPlayer'
+import type { VideoPlayerHandle } from '@/components/VideoPlayer'
+import { getTranscript, queryVideo } from '@/lib/api'
+import type { Segment, TranscriptSegment, Video } from '@/lib/types'
 
 type PlayerPageProps = {
   videoId: string

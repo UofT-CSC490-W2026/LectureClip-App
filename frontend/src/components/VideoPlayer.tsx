@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
-import type { Segment } from '../lib/types.ts'
+import type { Segment } from '@/lib/types'
 
 type VideoPlayerProps = {
   src: string

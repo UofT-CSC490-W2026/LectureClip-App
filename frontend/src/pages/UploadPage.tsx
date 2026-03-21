@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { uploadVideo } from '../lib/api'
+import { uploadVideo } from '@/lib/api'
 
 type UploadPageProps = {
   onUploadComplete: (videoId: string, file: File) => void

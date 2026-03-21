@@ -1,13 +1,13 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import type { Segment } from './lib/types'
-import App from './App'
+import type { Segment } from '@/lib/types'
+import App from '@/App'
 
 const uploadedFile = new File(['video-bytes'], 'lecture.mp4', { type: 'video/mp4' })
 const queriedSegments: Segment[] = [{ start: 12, end: 28 }]
 
-vi.mock('./pages/UploadPage', () => ({
+vi.mock('@/pages/UploadPage', () => ({
   UploadPage: ({
     onUploadComplete,
   }: {
@@ -19,7 +19,7 @@ vi.mock('./pages/UploadPage', () => ({
   ),
 }))
 
-vi.mock('./pages/QueryPage', () => ({
+vi.mock('@/pages/QueryPage', () => ({
   QueryPage: ({
     onQueryComplete,
   }: {
@@ -31,7 +31,7 @@ vi.mock('./pages/QueryPage', () => ({
   ),
 }))
 
-vi.mock('./pages/PlayerPage', () => ({
+vi.mock('@/pages/PlayerPage', () => ({
   PlayerPage: ({
     videoId,
     file,

@@ -1,10 +1,10 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { uploadVideo } from '../lib/api'
-import { UploadPage } from './UploadPage'
+import { uploadVideo } from '@/lib/api'
+import { UploadPage } from '@/pages/UploadPage'
 
-vi.mock('../lib/api', () => ({
+vi.mock('@/lib/api', () => ({
   uploadVideo: vi.fn(),
 }))
 
