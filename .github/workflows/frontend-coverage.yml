@@ -40,18 +40,18 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Install frontend dependencies
+        run: npm ci --no-audit --no-fund
+
       - name: Print toolchain versions
         run: |
           node -v
           npm -v
-          npx vite --version
-          npx vitest --version
+          npm exec -- vite --version
+          npm exec -- vitest --version
 
       - name: Print frontend dependency versions
         run: npm ls vite vitest @vitest/coverage-istanbul jsdom @vitejs/plugin-react --depth=0
-
-      - name: Install frontend dependencies
-        run: npm ci --no-audit --no-fund
 
       - name: Run Vitest coverage
         run: npm run test:coverage:ci
