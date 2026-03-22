@@ -1,8 +1,12 @@
 """Unit tests for lambdas/process-results/."""
 
+import importlib
+import io
 import json
-import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+
+import boto3
+from moto import mock_aws
 
 from conftest import load_lambda
 
@@ -77,12 +81,35 @@ SAMPLE_TRANSCRIPT = {
 FAKE_EMBEDDING = [0.1] * 1024
 
 
-def _mock_bedrock():
-    m = MagicMock()
-    m.invoke_model.return_value = {
-        "body": MagicMock(read=lambda: json.dumps({"embedding": FAKE_EMBEDDING}).encode())
-    }
-    return m
+class _FakeBedrockRuntime:
+    """
+    Plain stub for bedrock-runtime.invoke_model.
+
+    Moto does not implement InvokeModel for bedrock-runtime, so we provide a
+    simple stub class (no MagicMock) that records call arguments and returns
+    a well-formed streaming body so that bedrock_utils can parse it normally.
+    """
+
+    def __init__(self, embedding=None):
+        self._embedding = embedding if embedding is not None else FAKE_EMBEDDING
+        self.last_kwargs = {}
+
+    def invoke_model(self, **kwargs):
+        self.last_kwargs = kwargs
+        body = json.dumps({"embedding": self._embedding}).encode()
+        return {"body": io.BytesIO(body)}
+
+
+def _s3_with_transcript(region="us-east-1"):
+    """Create a moto S3 bucket pre-loaded with SAMPLE_TRANSCRIPT."""
+    s3 = boto3.client("s3", region_name=region)
+    s3.create_bucket(Bucket=TRANSCRIPT_BUCKET)
+    s3.put_object(
+        Bucket=TRANSCRIPT_BUCKET,
+        Key=TRANSCRIPT_KEY,
+        Body=json.dumps(SAMPLE_TRANSCRIPT).encode(),
+    )
+    return s3
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +120,7 @@ def _mock_bedrock():
 class TestProcessItems:
     def setup_method(self, method):
         import transcript_utils
+        importlib.reload(transcript_utils)
         self.mod = transcript_utils
 
     def test_pronunciation_items_become_tuples(self):
@@ -124,6 +152,7 @@ class TestProcessItems:
 class TestCombineBySpeaker:
     def setup_method(self, method):
         import transcript_utils
+        importlib.reload(transcript_utils)
         self.mod = transcript_utils
 
     def _items(self):
@@ -169,90 +198,102 @@ class TestCombineBySpeaker:
         assert len(chunks) >= 1
 
 
+@mock_aws
 class TestFetchAndParseTranscript:
-    def _mock_s3(self):
-        m = MagicMock()
-        m.get_object.return_value = {
-            "Body": MagicMock(read=lambda: json.dumps(SAMPLE_TRANSCRIPT).encode())
-        }
-        return m
+    def setup_method(self, method):
+        """Set up S3 bucket with transcript JSON and reload module."""
+        self.s3 = _s3_with_transcript()
+
+        import transcript_utils
+        importlib.reload(transcript_utils)
+        self.tu = transcript_utils
 
     def test_returns_list_of_tuples(self):
-        import transcript_utils
-        with patch.object(transcript_utils, "s3", self._mock_s3()):
-            result = transcript_utils.fetch_and_parse_transcript(TRANSCRIPT_URL)
+        result = self.tu.fetch_and_parse_transcript(TRANSCRIPT_URL)
         assert isinstance(result, list)
         assert all(len(t) == 3 for t in result)
 
     def test_each_tuple_has_second_speaker_text(self):
-        import transcript_utils
-        with patch.object(transcript_utils, "s3", self._mock_s3()):
-            result = transcript_utils.fetch_and_parse_transcript(TRANSCRIPT_URL)
+        result = self.tu.fetch_and_parse_transcript(TRANSCRIPT_URL)
         for second, speaker, text in result:
             assert isinstance(second, int)
             assert speaker.startswith("spk_")
             assert isinstance(text, str) and text
 
-    def test_get_object_called_with_correct_bucket_and_key(self):
-        import transcript_utils
-        mock_s3 = self._mock_s3()
-        with patch.object(transcript_utils, "s3", mock_s3):
-            transcript_utils.fetch_and_parse_transcript(TRANSCRIPT_URL)
-        mock_s3.get_object.assert_called_once_with(
-            Bucket=TRANSCRIPT_BUCKET, Key=TRANSCRIPT_KEY
+    def test_fetches_from_correct_s3_bucket_and_key(self):
+        # Put different content at a wrong key; the correct key should be read.
+        self.s3.put_object(
+            Bucket=TRANSCRIPT_BUCKET,
+            Key="wrong/path/transcribe.json",
+            Body=b"not valid json",
         )
+        result = self.tu.fetch_and_parse_transcript(TRANSCRIPT_URL)
+        assert len(result) > 0
+
+    def test_missing_object_raises(self):
+        import pytest
+        self.s3.delete_object(Bucket=TRANSCRIPT_BUCKET, Key=TRANSCRIPT_KEY)
+        with pytest.raises(Exception):
+            self.tu.fetch_and_parse_transcript(TRANSCRIPT_URL)
 
 
 # ---------------------------------------------------------------------------
 # bedrock_utils tests
 # ---------------------------------------------------------------------------
+#
+# Moto does not implement bedrock-runtime InvokeModel ("Not yet implemented").
+# We use _FakeBedrockRuntime — a plain Python stub — instead of MagicMock so
+# that the tests remain meaningful (call args are captured and asserted) while
+# avoiding the real AWS endpoint.
+# ---------------------------------------------------------------------------
 
 
+@mock_aws
 class TestEmbedText:
     def setup_method(self, method):
         import bedrock_utils
+        importlib.reload(bedrock_utils)
         self.mod = bedrock_utils
 
     def test_calls_invoke_model_with_correct_model_id(self):
-        mock_b = _mock_bedrock()
-        with patch.object(self.mod, "bedrock", mock_b):
+        fake = _FakeBedrockRuntime()
+        with patch.object(self.mod, "bedrock", fake):
             self.mod.embed_text("hello", "amazon.titan-embed-text-v2:0", 1024)
-        _, kwargs = mock_b.invoke_model.call_args
-        assert kwargs["modelId"] == "amazon.titan-embed-text-v2:0"
+        assert fake.last_kwargs["modelId"] == "amazon.titan-embed-text-v2:0"
 
     def test_request_body_contains_dimensions(self):
-        mock_b = _mock_bedrock()
-        with patch.object(self.mod, "bedrock", mock_b):
+        fake = _FakeBedrockRuntime()
+        with patch.object(self.mod, "bedrock", fake):
             self.mod.embed_text("hello", "amazon.titan-embed-text-v2:0", 512)
-        _, kwargs = mock_b.invoke_model.call_args
-        body = json.loads(kwargs["body"])
+        body = json.loads(fake.last_kwargs["body"])
         assert body["dimensions"] == 512
 
     def test_request_body_contains_input_text(self):
-        mock_b = _mock_bedrock()
-        with patch.object(self.mod, "bedrock", mock_b):
+        fake = _FakeBedrockRuntime()
+        with patch.object(self.mod, "bedrock", fake):
             self.mod.embed_text("test sentence", "amazon.titan-embed-text-v2:0", 1024)
-        _, kwargs = mock_b.invoke_model.call_args
-        body = json.loads(kwargs["body"])
+        body = json.loads(fake.last_kwargs["body"])
         assert body["inputText"] == "test sentence"
 
     def test_returns_embedding_vector(self):
-        mock_b = _mock_bedrock()
-        with patch.object(self.mod, "bedrock", mock_b):
+        fake = _FakeBedrockRuntime()
+        with patch.object(self.mod, "bedrock", fake):
             result = self.mod.embed_text("hello", "amazon.titan-embed-text-v2:0", 1024)
         assert result == FAKE_EMBEDDING
 
 
+@mock_aws
 class TestGenerateTextEmbeddings:
     def setup_method(self, method):
         import bedrock_utils
+        importlib.reload(bedrock_utils)
         self.mod = bedrock_utils
 
     def _run(self, segments=None):
         if segments is None:
             segments = [(0, "spk_0", "Hello world."), (1, "spk_1", "Goodbye.")]
-        mock_b = _mock_bedrock()
-        with patch.object(self.mod, "bedrock", mock_b):
+        fake = _FakeBedrockRuntime()
+        with patch.object(self.mod, "bedrock", fake):
             return self.mod.generate_text_embeddings(
                 segments, MEDIA_URI, "amazon.titan-embed-text-v2:0", 1024
             )
@@ -295,22 +336,26 @@ class TestGenerateTextEmbeddings:
 # ---------------------------------------------------------------------------
 
 
+@mock_aws
 class TestHandler:
     def setup_method(self, method):
+        """Set up S3 bucket with transcript JSON before each test."""
+        _s3_with_transcript()
+
+        import transcript_utils
+        import bedrock_utils
+        import aurora_utils
+        importlib.reload(transcript_utils)
+        importlib.reload(bedrock_utils)
+        importlib.reload(aurora_utils)
+
         self.mod = load_lambda("process-results")
 
-    def _mock_s3(self):
-        m = MagicMock()
-        m.get_object.return_value = {
-            "Body": MagicMock(read=lambda: json.dumps(SAMPLE_TRANSCRIPT).encode())
-        }
-        return m
-
     def _run(self, event=None):
-        import bedrock_utils, transcript_utils
+        import bedrock_utils
         event = event or {"transcriptUrl": TRANSCRIPT_URL, "mediaUrl": MEDIA_URI}
-        with patch.object(bedrock_utils, "bedrock", _mock_bedrock()), \
-             patch.object(transcript_utils, "s3", self._mock_s3()):
+        fake = _FakeBedrockRuntime()
+        with patch.object(bedrock_utils, "bedrock", fake):
             return self.mod.handler(event, {})
 
     def test_returns_200(self):
@@ -328,11 +373,8 @@ class TestHandler:
 
     def test_raises_without_transcript_url(self):
         import pytest
-        import bedrock_utils
-        mock_b = _mock_bedrock()
-        with patch.object(bedrock_utils, "bedrock", mock_b):
-            with pytest.raises(ValueError, match="transcriptUrl"):
-                self.mod.handler({"mediaUrl": MEDIA_URI}, {})
+        with pytest.raises(ValueError, match="transcriptUrl"):
+            self.mod.handler({"mediaUrl": MEDIA_URI}, {})
 
     def test_media_url_key_accepted(self):
         result = self._run({"transcriptUrl": TRANSCRIPT_URL, "mediaUrl": MEDIA_URI})
