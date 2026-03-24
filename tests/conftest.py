@@ -14,6 +14,8 @@ os.environ.setdefault("BUCKET_NAME", "test-bucket")
 os.environ.setdefault("REGION", "us-east-1")
 # boto3 reads AWS_DEFAULT_REGION, not REGION.
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+os.environ.setdefault("AURORA_CLUSTER_ARN", "arn:aws:cluster:us-east-1:123456789012:cluster")
+os.environ.setdefault("AURORA_SECRET_ARN", "arn:aws:secret:us-east-1:123456789012:secret")
 
 # process-transcribe imports sibling modules (transcribe_utils, etc.) by bare
 # name, so its directory must be on sys.path before load_lambda runs.
