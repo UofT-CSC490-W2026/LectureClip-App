@@ -55,6 +55,7 @@ def _process_items(items):
     embeddings include natural sentence endings without losing any content.
     """
     result = []
+    append_result = result.append
     for item in items:
         content = item["alternatives"][0]["content"]
         if item["type"] == "punctuation":
@@ -62,9 +63,10 @@ def _process_items(items):
                 sec, spk, txt = result[-1]
                 result[-1] = (sec, spk, txt + content)
         else:
-            sec = math.floor(float(item["start_time"]))
+            # Transcribe start_time is non-negative, so int() is a faster floor.
+            sec = int(float(item["start_time"]))
             spk = item.get("speaker_label", "spk_0")
-            result.append((sec, spk, content))
+            append_result((sec, spk, content))
     return result
 
 

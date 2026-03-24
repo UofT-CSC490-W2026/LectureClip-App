@@ -175,6 +175,10 @@ Supported formats: `mp4`, `mov`, `avi`, `webm`, `mpeg`, `mkv`
 
 Unit tests cover each Lambda handler and an end-to-end flow that mirrors `upload_video.py`. No AWS credentials or network access required — boto3 is mocked with `unittest.mock`.
 
+## Performance Profiling
+
+Backend profiling notes, hotspot rationale, and measured before/after results live in [`PERFORMANCE_PROFILING.md`](PERFORMANCE_PROFILING.md).
+
 ### Frontend (Vitest)
 
 The frontend uses Vitest with Testing Library and `@vitest/coverage-v8`.

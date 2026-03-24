@@ -45,11 +45,15 @@ def generate_text_embeddings(segments, source_uri, model_id, embedding_dim):
     """
     filename = source_uri.rsplit("/", 1)[-1] if source_uri else ""
     results = []
+    append_result = results.append
+    embed = embed_text
+    new_id = uuid.uuid4
+    created_at = datetime.now(timezone.utc).isoformat()
 
     for start_second, speaker, text in segments:
-        vector = embed_text(text, model_id, embedding_dim)
-        results.append({
-            "id":           str(uuid.uuid4()),
+        vector = embed(text, model_id, embedding_dim)
+        append_result({
+            "id":           str(new_id()),
             "embedding":    vector,
             "text":         text,
             "start_second": start_second,
@@ -57,7 +61,9 @@ def generate_text_embeddings(segments, source_uri, model_id, embedding_dim):
             "source":       filename,
             "source_uri":   source_uri,
             "model_id":     model_id,
-            "created_at":   datetime.now(timezone.utc).isoformat(),
+            # All records belong to the same embedding batch, so one timestamp
+            # avoids repeating datetime formatting work in the hot loop.
+            "created_at":   created_at,
         })
 
     return results

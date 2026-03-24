@@ -5,6 +5,7 @@ Writes lecture metadata, transcript segments, and embedding vectors via the
 RDS Data API — no direct database connection required.
 """
 
+import json
 import os
 import uuid
 
@@ -63,10 +64,17 @@ def insert_segments(lecture_id, segments):
     for the last one).
     """
     records = []
+    append_record = records.append
+    execute = _execute
+    namespace = uuid.NAMESPACE_URL
+    make_segment_id = uuid.uuid5
+    last_index = len(segments) - 1
+
     for idx, (start_s, _speaker, text) in enumerate(segments):
-        end_s = float(segments[idx + 1][0]) if idx + 1 < len(segments) else float(start_s) + 30.0
-        segment_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{lecture_id}:{idx}"))
-        _execute(
+        start_s_float = float(start_s)
+        end_s = float(segments[idx + 1][0]) if idx < last_index else start_s_float + 30.0
+        segment_id = str(make_segment_id(namespace, f"{lecture_id}:{idx}"))
+        execute(
             """
             INSERT INTO segments (segment_id, lecture_id, idx, start_s, end_s, text)
             VALUES (:sid::uuid, :lid::uuid, :idx, :start_s, :end_s, :text)
@@ -79,12 +87,12 @@ def insert_segments(lecture_id, segments):
                 {"name": "sid",     "value": {"stringValue": segment_id}},
                 {"name": "lid",     "value": {"stringValue": lecture_id}},
                 {"name": "idx",     "value": {"longValue":   idx}},
-                {"name": "start_s", "value": {"doubleValue": float(start_s)}},
+                {"name": "start_s", "value": {"doubleValue": start_s_float}},
                 {"name": "end_s",   "value": {"doubleValue": end_s}},
                 {"name": "text",    "value": {"stringValue": text}},
             ],
         )
-        records.append((segment_id, float(start_s), end_s, text))
+        append_record((segment_id, start_s_float, end_s, text))
     return records
 
 
@@ -96,10 +104,16 @@ def insert_embeddings(segment_records, embeddings, model_id):
     embeddings:      list of dicts with 'embedding' key from bedrock_utils
     model_id:        Bedrock model ID string stored alongside each vector
     """
+    execute = _execute
+    new_embedding_id = uuid.uuid4
+    vector_to_str = json.dumps
+
     for (segment_id, *_), emb_record in zip(segment_records, embeddings):
-        embedding_id = str(uuid.uuid4())
-        vector_str = "[" + ",".join(str(v) for v in emb_record["embedding"]) + "]"
-        _execute(
+        embedding_id = str(new_embedding_id())
+        # json.dumps runs in C and already emits the pgvector-compatible list
+        # syntax we need when separators remove whitespace.
+        vector_str = vector_to_str(emb_record["embedding"], separators=(",", ":"))
+        execute(
             """
             INSERT INTO segment_embeddings (embedding_id, segment_id, embedding, model_id)
             VALUES (:eid::uuid, :sid::uuid, :vec::vector, :model_id)
