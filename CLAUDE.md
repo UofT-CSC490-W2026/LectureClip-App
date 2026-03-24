@@ -66,9 +66,12 @@ S3 key format: `{ISO-timestamp}/{userId}/{filename}`
 ```bash
 python -m pytest          # run all tests
 python -m pytest -v       # verbose
+python -m pytest --cov --cov-report=term-missing --cov-report=html:backend-coverage/html --cov-report=xml:backend-coverage/coverage.xml --cov-report=json:backend-coverage/coverage-summary.json
 ```
 
 Tests live in `tests/`. `conftest.py` sets all required environment variables (including `AWS_DEFAULT_REGION` for boto3) and adds `src/lambdas/process-transcribe/` to `sys.path` so its sibling modules are importable. Lambda modules are loaded via `load_lambda("function-dir-name")` which uses `importlib` to handle the hyphenated directory names.
+
+Coverage is tracked by a GitHub Actions workflow (`.github/workflows/backend-coverage.yml`) which runs on backend pushes/PRs, comments coverage on PRs, and updates the badge at `.github/badges/backend-coverage.svg`.
 
 ### Frontend
 

@@ -1,0 +1,191 @@
+name: Backend Coverage
+
+on:
+  pull_request:
+    paths:
+      - 'src/lambdas/**'
+      - 'tests/**'
+      - '.coveragerc'
+      - 'pytest.ini'
+      - '.github/workflows/backend-coverage.yml'
+      - 'scripts/generate-coverage-badge.mjs'
+      - 'README.md'
+  push:
+    branches: [main, develop]
+    paths:
+      - 'src/lambdas/**'
+      - 'tests/**'
+      - '.coveragerc'
+      - 'pytest.ini'
+      - '.github/workflows/backend-coverage.yml'
+      - 'scripts/generate-coverage-badge.mjs'
+      - 'README.md'
+
+concurrency:
+  group: backend-coverage-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-coverage:
+    name: Run backend tests with coverage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: tests/requirements.txt
+
+      - name: Install backend test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r tests/requirements.txt
+
+      - name: Print toolchain versions
+        run: |
+          python --version
+          pip --version
+          pytest --version
+          coverage --version
+
+      - name: Run pytest coverage
+        run: |
+          pytest \
+            --cov \
+            --cov-report=term-missing \
+            --cov-report=html:backend-coverage/html \
+            --cov-report=xml:backend-coverage/coverage.xml \
+            --cov-report=json:backend-coverage/coverage-summary.json
+
+      - name: Build coverage summary
+        id: coverage-summary
+        run: |
+          python <<'EOF'
+          import json
+          import os
+          from pathlib import Path
+
+          summary_path = Path("backend-coverage/coverage-summary.json")
+          summary = json.loads(summary_path.read_text())
+          totals = summary["totals"]
+
+          line_pct = float(totals["percent_covered"])
+          covered_lines = int(totals["covered_lines"])
+          total_lines = int(totals["num_statements"])
+          missing_lines = int(totals["missing_lines"])
+          excluded_lines = int(totals["excluded_lines"])
+          file_count = len(summary.get("files", {}))
+
+          total_branches = int(totals.get("num_branches", 0))
+          covered_branches = int(totals.get("covered_branches", 0))
+          if total_branches:
+              branch_pct = (covered_branches / total_branches) * 100
+              branch_line = f"- Branches: {branch_pct:.2f}% ({covered_branches}/{total_branches})"
+          else:
+              branch_pct = 0.0
+              branch_line = "- Branches: n/a (no branch data reported)"
+
+          body = "\n".join([
+              "## Backend coverage",
+              "",
+              f"- Lines: {line_pct:.2f}% ({covered_lines}/{total_lines})",
+              branch_line,
+              f"- Missing lines: {missing_lines}",
+              f"- Excluded lines: {excluded_lines}",
+              f"- Files measured: {file_count}",
+          ])
+
+          Path("backend-coverage/pr-comment.md").write_text(body)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as handle:
+              handle.write(f"{body}\n")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"line_pct={line_pct:.2f}\n")
+              handle.write(f"branch_pct={branch_pct:.2f}\n")
+          EOF
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage-${{ github.run_id }}
+          path: backend-coverage
+          if-no-files-found: error
+
+      - name: Upload coverage summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage-summary-${{ github.run_id }}
+          path: backend-coverage/coverage-summary.json
+          if-no-files-found: error
+
+      - name: Comment coverage on pull request
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs')
+
+            const marker = '<!-- backend-coverage-comment -->'
+            const body = `${marker}\n${fs.readFileSync('backend-coverage/pr-comment.md', 'utf8')}\n\nCoverage artifact: \`backend-coverage\` from this workflow run.`
+            const { owner, repo } = context.repo
+            const issue_number = context.issue.number
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+            })
+            const existing = comments.find((comment) => comment.body.includes(marker))
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              })
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              })
+            }
+
+  update-badge:
+    name: Update backend coverage badge
+    runs-on: ubuntu-latest
+    needs: test-coverage
+    if: github.event_name == 'push' && github.ref_name == 'main'
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+
+      - name: Download coverage summary
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-coverage-summary-${{ github.run_id }}
+          path: backend-coverage
+
+      - name: Generate coverage badge
+        run: node scripts/generate-coverage-badge.mjs backend-coverage/coverage-summary.json .github/badges/backend-coverage.svg "backend coverage"
+
+      - name: Commit coverage badge
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'ci: update backend coverage badge'
+          file_pattern: .github/badges/backend-coverage.svg

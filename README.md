@@ -3,6 +3,7 @@
 Serverless AWS backend for uploading lecture videos directly to S3 and transcribing them with Amazon Transcribe.
 
 ![Frontend coverage](.github/badges/frontend-coverage.svg)
+![Backend coverage](.github/badges/backend-coverage.svg)
 
 ## Architecture
 
@@ -91,10 +92,12 @@ LectureClip-App/
 │   └── deploy.sh                  # Build and deploy Lambdas to AWS
 ├── .github/
 │   ├── badges/
-│   │   └── frontend-coverage.svg  # Repository-hosted frontend coverage badge
+│   │   ├── frontend-coverage.svg  # Repository-hosted frontend coverage badge
+│   │   └── backend-coverage.svg   # Repository-hosted backend coverage badge
 │   └── workflows/
 │       ├── deploy-lambda.yml      # CI/CD — deploys on push to main when src/ changes
-│       └── frontend-coverage.yml  # CI — runs Vitest coverage, comments on PRs, updates badge
+│       ├── frontend-coverage.yml  # CI — runs Vitest coverage, comments on PRs, updates badge
+│       └── backend-coverage.yml   # CI — runs pytest coverage, comments on PRs, updates badge
 ├── pytest.ini                     # Points pytest at tests/
 └── template.yaml                  # SAM template (local dev + CI builds)
 ```
@@ -177,7 +180,7 @@ Unit tests cover each Lambda handler and an end-to-end flow that mirrors `upload
 
 ### Frontend (Vitest)
 
-The frontend uses Vitest with Testing Library and `@vitest/coverage-v8`.
+The frontend uses Vitest with Testing Library and `@vitest/coverage-istanbul`.
 
 ```bash
 cd frontend
@@ -219,7 +222,22 @@ pytest tests/test_upload_flow.py
 
 # Verbose output
 pytest -v
+
+# Coverage (terminal + html + xml + json summary)
+pytest \
+  --cov \
+  --cov-report=term-missing \
+  --cov-report=html:backend-coverage/html \
+  --cov-report=xml:backend-coverage/coverage.xml \
+  --cov-report=json:backend-coverage/coverage-summary.json
+
+# Refresh the repository-hosted backend coverage badge locally
+node scripts/generate-coverage-badge.mjs backend-coverage/coverage-summary.json .github/badges/backend-coverage.svg "backend coverage"
 ```
+
+Coverage output lands in `backend-coverage/`.
+
+`.github/workflows/backend-coverage.yml` runs automatically for backend pushes and pull requests, uploads the coverage report as a workflow artifact, posts a coverage summary comment on non-fork PRs, and updates `.github/badges/backend-coverage.svg` on pushes to `main`.
 
 ### Test layout
 
