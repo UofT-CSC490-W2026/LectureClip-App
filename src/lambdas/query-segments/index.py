@@ -33,8 +33,16 @@ def handler(event, context):
 
     video_id = body.get("videoId")
     query    = body.get("query")
-    k        = int(body.get("k", 5))
 
+    raw_k = body.get("k", 5)
+    try:
+        k = int(raw_k)
+    except (TypeError, ValueError):
+        return _resp(400, {"error": "k must be an integer"})
+
+    # Enforce reasonable bounds for k to protect the DB query.
+    if k < 1 or k > 100:
+        return _resp(400, {"error": "k must be between 1 and 100"})
     if not video_id:
         return _resp(400, {"error": "videoId is required"})
     if not query:
