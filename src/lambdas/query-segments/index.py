@@ -10,6 +10,14 @@ BUCKET_NAME        = os.environ.get("BUCKET_NAME")
 
 if not BUCKET_NAME or not BUCKET_NAME.strip():
     raise RuntimeError("BUCKET_NAME environment variable is required for query-segments Lambda")
+
+_CORS_HEADERS = {
+    "Access-Control-Allow-Origin":  "*",
+    "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
+    "Access-Control-Allow-Methods": "POST,OPTIONS",
+}
+
+
 def handler(event, context):
     """
     Semantic search over lecture transcript segments.
@@ -25,6 +33,10 @@ def handler(event, context):
     Segments are ordered by cosine similarity (most relevant first).
     """
     print("Event:", json.dumps(event))
+
+    http_method = event.get("httpMethod") or event.get("requestContext", {}).get("http", {}).get("method", "")
+    if http_method == "OPTIONS":
+        return {"statusCode": 200, "headers": _CORS_HEADERS, "body": json.dumps({"message": "CORS preflight successful"})}
 
     try:
         body = json.loads(event.get("body") or "{}")
@@ -62,9 +74,6 @@ def handler(event, context):
 def _resp(status_code, body):
     return {
         "statusCode": status_code,
-        "headers": {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-        },
+        "headers": {"Content-Type": "application/json", **_CORS_HEADERS},
         "body": json.dumps(body),
     }

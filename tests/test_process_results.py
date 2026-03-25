@@ -3,9 +3,11 @@
 import importlib
 import io
 import json
+import uuid
 from unittest.mock import patch
 
 import boto3
+import requests
 from moto import mock_aws
 
 from conftest import load_lambda, load_module
@@ -327,6 +329,80 @@ class TestGenerateTextEmbeddings:
         result = self._run()
         ids = [r["id"] for r in result]
         assert len(set(ids)) == len(ids)
+
+
+# ---------------------------------------------------------------------------
+# aurora_utils tests
+# ---------------------------------------------------------------------------
+#
+# All three aurora_utils functions call execute_statement (which moto supports)
+# but do not rely on the return value for writes. Moto returns 0 records by
+# default, which is correct for INSERT/upsert calls. The _prime_rds helper is
+# used to inject custom results when the return value matters.
+# ---------------------------------------------------------------------------
+
+
+@mock_aws
+class TestAuroraUtils:
+    def setup_method(self, method):
+        self.mod = load_module("process-results", "aurora_utils")
+
+    def _prime_rds(self, records, column_metadata):
+        """Queue a result set for the next moto execute_statement call."""
+        resp = requests.post(
+            "http://motoapi.amazonaws.com/moto-api/static/rds-data/statement-results",
+            json={"results": [{"records": records, "columnMetadata": column_metadata}]},
+        )
+        assert resp.status_code == 201
+
+    # -- upsert_lecture -------------------------------------------------------
+
+    def test_upsert_lecture_returns_valid_uuid(self):
+        result = self.mod.upsert_lecture(MEDIA_URI)
+        uuid.UUID(result)  # raises ValueError if not a valid UUID
+
+    def test_upsert_lecture_is_deterministic(self):
+        assert self.mod.upsert_lecture(MEDIA_URI) == self.mod.upsert_lecture(MEDIA_URI)
+
+    def test_upsert_lecture_different_uris_give_different_ids(self):
+        assert self.mod.upsert_lecture(MEDIA_URI) != self.mod.upsert_lecture("s3://bucket/other.mp4")
+
+    # -- insert_segments ------------------------------------------------------
+
+    def test_insert_segments_returns_one_record_per_segment(self):
+        segments = [(0, "spk_0", "Hello."), (1, "spk_1", "World.")]
+        records = self.mod.insert_segments("lecture-id", segments)
+        assert len(records) == 2
+
+    def test_insert_segments_record_shape(self):
+        records = self.mod.insert_segments("lecture-id", [(5, "spk_0", "Hello.")])
+        segment_id, start_s, end_s, text = records[0]
+        assert isinstance(segment_id, str)
+        assert start_s == 5.0
+        assert end_s == 35.0  # last segment: start_s + 30
+        assert text == "Hello."
+
+    def test_insert_segments_end_s_uses_next_start(self):
+        segments = [(0, "spk_0", "First."), (10, "spk_1", "Second.")]
+        records = self.mod.insert_segments("lecture-id", segments)
+        assert records[0][2] == 10.0  # end_s of first == start_s of second
+
+    def test_insert_segments_ids_are_deterministic(self):
+        segments = [(0, "spk_0", "Hello.")]
+        first  = self.mod.insert_segments("lecture-id", segments)
+        second = self.mod.insert_segments("lecture-id", segments)
+        assert first[0][0] == second[0][0]
+
+    # -- insert_embeddings ----------------------------------------------------
+
+    def test_insert_embeddings_runs_without_error(self):
+        seg_records = [
+            ("seg-id-1", 0.0, 30.0, "Hello."),
+            ("seg-id-2", 30.0, 60.0, "World."),
+        ]
+        embeddings = [{"embedding": FAKE_EMBEDDING}, {"embedding": FAKE_EMBEDDING}]
+        # moto execute_statement is a no-op for INSERTs — just verify no exception
+        self.mod.insert_embeddings(seg_records, embeddings, "amazon.titan-embed-text-v2:0")
 
 
 # ---------------------------------------------------------------------------

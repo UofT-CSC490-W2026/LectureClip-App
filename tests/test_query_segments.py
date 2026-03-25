@@ -3,9 +3,9 @@
 import importlib
 import io
 import json
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-import boto3
+import requests
 from moto import mock_aws
 
 from conftest import load_lambda
@@ -82,81 +82,62 @@ class TestSearchSegments:
         importlib.reload(aurora_utils)
         self.mod = aurora_utils
 
+    def _prime_rds(self, records, column_metadata):
+        """Queue a result set for the next moto execute_statement call."""
+        resp = requests.post(
+            "http://motoapi.amazonaws.com/moto-api/static/rds-data/statement-results",
+            json={"results": [{"records": records, "columnMetadata": column_metadata}]},
+        )
+        assert resp.status_code == 201
+
+    def _mock_rds(self):
+        """Return a MagicMock rds_data client whose execute_statement returns empty results."""
+        mock = MagicMock()
+        mock.execute_statement.return_value = {"records": [], "columnMetadata": []}
+        return mock
+
     def test_returns_a_list(self):
-        # Moto intercepts execute_statement and returns empty records; the
-        # function should still return a list without raising.
+        # Moto intercepts execute_statement and returns empty records by default.
         result = self.mod.search_segments(FAKE_LECTURE_ID, FAKE_EMBEDDING, 5)
         assert isinstance(result, list)
 
     def test_each_result_has_start_and_end(self):
-        # With moto returning no real rows this verifies the empty-records path.
         result = self.mod.search_segments(FAKE_LECTURE_ID, FAKE_EMBEDDING, 5)
         for item in result:
             assert "start" in item
             assert "end" in item
 
     def test_k_is_forwarded_to_rds(self):
-        # Patch rds_data to capture the parameters sent to execute_statement.
-        calls = []
-
-        class _FakeRds:
-            def execute_statement(self, **kwargs):
-                calls.append(kwargs)
-                return {"records": [], "columnMetadata": []}
-
-        with patch.object(self.mod, "rds_data", _FakeRds()):
+        mock_rds = self._mock_rds()
+        with patch.object(self.mod, "rds_data", mock_rds):
             self.mod.search_segments(FAKE_LECTURE_ID, FAKE_EMBEDDING, 7)
-
-        params = {p["name"]: p["value"] for p in calls[0]["parameters"]}
+        params = {p["name"]: p["value"] for p in mock_rds.execute_statement.call_args.kwargs["parameters"]}
         assert params["k"] == {"longValue": 7}
 
     def test_lecture_id_is_forwarded_to_rds(self):
-        calls = []
-
-        class _FakeRds:
-            def execute_statement(self, **kwargs):
-                calls.append(kwargs)
-                return {"records": [], "columnMetadata": []}
-
-        with patch.object(self.mod, "rds_data", _FakeRds()):
+        mock_rds = self._mock_rds()
+        with patch.object(self.mod, "rds_data", mock_rds):
             self.mod.search_segments(FAKE_LECTURE_ID, FAKE_EMBEDDING, 5)
-
-        params = {p["name"]: p["value"] for p in calls[0]["parameters"]}
+        params = {p["name"]: p["value"] for p in mock_rds.execute_statement.call_args.kwargs["parameters"]}
         assert params["video_uri"] == {"stringValue": FAKE_LECTURE_ID}
 
     def test_embedding_vector_serialised_as_bracket_notation(self):
-        calls = []
-
-        class _FakeRds:
-            def execute_statement(self, **kwargs):
-                calls.append(kwargs)
-                return {"records": [], "columnMetadata": []}
-
+        mock_rds = self._mock_rds()
         small_vec = [0.5, -0.3, 1.0]
-        with patch.object(self.mod, "rds_data", _FakeRds()):
+        with patch.object(self.mod, "rds_data", mock_rds):
             self.mod.search_segments(FAKE_LECTURE_ID, small_vec, 5)
-
-        params = {p["name"]: p["value"] for p in calls[0]["parameters"]}
+        params = {p["name"]: p["value"] for p in mock_rds.execute_statement.call_args.kwargs["parameters"]}
         assert params["vec"] == {"stringValue": "[0.5,-0.3,1.0]"}
 
     def test_rows_mapped_to_start_end_dicts(self):
-        class _FakeRds:
-            def execute_statement(self, **kwargs):
-                return {
-                    "columnMetadata": [
-                        {"label": "start_s"},
-                        {"label": "end_s"},
-                        {"label": "similarity"},
-                    ],
-                    "records": [
-                        [{"doubleValue": 12.0}, {"doubleValue": 28.0}, {"doubleValue": 0.95}],
-                        [{"doubleValue": 46.0}, {"doubleValue": 64.0}, {"doubleValue": 0.88}],
-                    ],
-                }
-
-        with patch.object(self.mod, "rds_data", _FakeRds()):
-            result = self.mod.search_segments(FAKE_LECTURE_ID, FAKE_EMBEDDING, 2)
-
+        self._prime_rds(
+            column_metadata=[{"label": "start_s"}, {"label": "end_s"}, {"label": "similarity"}],
+            records=[
+                [{"doubleValue": 12.0}, {"doubleValue": 28.0}, {"doubleValue": 0.95}],
+                [{"doubleValue": 46.0}, {"doubleValue": 64.0}, {"doubleValue": 0.88}],
+            ],
+        )
+        result = self.mod.search_segments(FAKE_LECTURE_ID, FAKE_EMBEDDING, 2)
         assert result == [{"start": 12.0, "end": 28.0}, {"start": 46.0, "end": 64.0}]
 
 
@@ -195,9 +176,21 @@ class TestHandler:
         body = json.loads(result["body"])
         assert isinstance(body["segments"], list)
 
-    def test_cors_header_present(self):
+    def test_cors_headers_present(self):
         result = self._run()
         assert result["headers"]["Access-Control-Allow-Origin"] == "*"
+        assert "Access-Control-Allow-Headers" in result["headers"]
+        assert "Access-Control-Allow-Methods" in result["headers"]
+
+    def test_options_preflight_returns_200(self):
+        result = self.mod.handler({"httpMethod": "OPTIONS", "body": None}, {})
+        assert result["statusCode"] == 200
+
+    def test_options_preflight_cors_headers(self):
+        result = self.mod.handler({"httpMethod": "OPTIONS", "body": None}, {})
+        assert result["headers"]["Access-Control-Allow-Origin"] == "*"
+        assert "POST" in result["headers"]["Access-Control-Allow-Methods"]
+        assert "OPTIONS" in result["headers"]["Access-Control-Allow-Methods"]
 
     def test_missing_video_id_returns_400(self):
         result = self._run({"query": "backpropagation"})
