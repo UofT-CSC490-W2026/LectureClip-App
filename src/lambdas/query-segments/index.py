@@ -6,9 +6,10 @@ from aurora_utils import search_segments
 
 EMBEDDING_MODEL_ID = os.environ.get("EMBEDDING_MODEL_ID", "amazon.titan-embed-text-v2:0")
 EMBEDDING_DIM      = int(os.environ.get("EMBEDDING_DIM", "1024"))
-BUCKET_NAME        = os.environ.get("BUCKET_NAME", "")
+BUCKET_NAME        = os.environ.get("BUCKET_NAME")
 
-
+if not BUCKET_NAME or not BUCKET_NAME.strip():
+    raise RuntimeError("BUCKET_NAME environment variable is required for query-segments Lambda")
 def handler(event, context):
     """
     Semantic search over lecture transcript segments.
