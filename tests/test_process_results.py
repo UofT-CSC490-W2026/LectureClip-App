@@ -8,7 +8,7 @@ from unittest.mock import patch
 import boto3
 from moto import mock_aws
 
-from conftest import load_lambda
+from conftest import load_lambda, load_module
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -285,9 +285,7 @@ class TestEmbedText:
 @mock_aws
 class TestGenerateTextEmbeddings:
     def setup_method(self, method):
-        import bedrock_utils
-        importlib.reload(bedrock_utils)
-        self.mod = bedrock_utils
+        self.mod = load_module("process-results", "bedrock_utils")
 
     def _run(self, segments=None):
         if segments is None:
@@ -342,12 +340,9 @@ class TestHandler:
         """Set up S3 bucket with transcript JSON before each test."""
         _s3_with_transcript()
 
-        import transcript_utils
-        import bedrock_utils
-        import aurora_utils
-        importlib.reload(transcript_utils)
-        importlib.reload(bedrock_utils)
-        importlib.reload(aurora_utils)
+        load_module("process-results", "transcript_utils")
+        load_module("process-results", "bedrock_utils")
+        load_module("process-results", "aurora_utils")
 
         self.mod = load_lambda("process-results")
 

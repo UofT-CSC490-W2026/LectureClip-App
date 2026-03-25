@@ -34,6 +34,14 @@ _PROCESS_RESULTS_DIR = os.path.join(
 if _PROCESS_RESULTS_DIR not in sys.path:
     sys.path.insert(0, _PROCESS_RESULTS_DIR)
 
+# query-segments imports bedrock_utils and aurora_utils as sibling modules.
+_QUERY_SEGMENTS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "src", "lambdas", "query-segments",
+)
+if _QUERY_SEGMENTS_DIR not in sys.path:
+    sys.path.insert(0, _QUERY_SEGMENTS_DIR)
+
 os.environ.setdefault("STATE_MACHINE_ARN", "arn:aws:states:us-east-1:123456789012:stateMachine:TestMachine")
 os.environ.setdefault("TRANSCRIBE_TABLE", "test-transcribe-table")
 os.environ.setdefault("TRANSCRIPTS_BUCKET", "test-transcripts-bucket")
@@ -44,6 +52,25 @@ import json
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEST_BUCKET = os.environ["BUCKET_NAME"]
 TEST_USER_ID = "user-test-123"
+
+
+def load_module(lambda_name: str, module_name: str):
+    """
+    Load a helper module from a specific Lambda directory and register it in
+    sys.modules under the bare module name.
+    """
+    lambda_dir = os.path.join(REPO_ROOT, "src", "lambdas", lambda_name)
+    path = os.path.join(lambda_dir, f"{module_name}.py")
+    sys.modules.pop(module_name, None)
+    sys.path.insert(0, lambda_dir)
+    try:
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = mod
+        spec.loader.exec_module(mod)
+    finally:
+        sys.path.remove(lambda_dir)
+    return mod
 
 
 def load_lambda(name: str):

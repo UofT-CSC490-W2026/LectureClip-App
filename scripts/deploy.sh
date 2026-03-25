@@ -23,6 +23,7 @@
 #   process-transcribe
 #   process-results
 #   db-migrate
+#   query-segments
 #
 # Prerequisites:
 #   - AWS SAM CLI  (sam build requires Docker or --use-container)
@@ -83,6 +84,7 @@ ALL_FUNCTIONS=(
   "process-transcribe|ProcessTranscribeFunction"
   "process-results|ProcessResultsFunction"
   "db-migrate|DbMigrateFunction"
+  "query-segments|QuerySegmentsFunction"
 )
 
 # ── filter to requested function ──────────────────────────────────────────────
@@ -95,7 +97,7 @@ for entry in "${ALL_FUNCTIONS[@]}"; do
   fi
 done
 
-[[ ${#FUNCTIONS_TO_DEPLOY[@]} -eq 0 ]] && err "unknown function '$FILTER_FUNCTION'. Choose: video-upload | multipart-init | multipart-complete | s3-trigger | start-transcribe | process-transcribe | process-results | db-migrate"
+[[ ${#FUNCTIONS_TO_DEPLOY[@]} -eq 0 ]] && err "unknown function '$FILTER_FUNCTION'. Choose: video-upload | multipart-init | multipart-complete | s3-trigger | start-transcribe | process-transcribe | process-results | db-migrate | query-segments"
 
 # ── summary ───────────────────────────────────────────────────────────────────
 
