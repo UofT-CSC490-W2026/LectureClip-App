@@ -1,0 +1,52 @@
+## Base model training
+timestamp: 2026-03-04 17:58:39
+
+- run: 8h100_d16_rms
+- device_type: 
+- fp8: False
+- fp8_recipe: tensorwise
+- depth: 16
+- aspect_ratio: 64
+- head_dim: 128
+- max_seq_len: 2048
+- window_pattern: SSSL
+- num_iterations: -1
+- target_flops: -1.0000
+- target_param_data_ratio: 10.5000
+- device_batch_size: 16
+- total_batch_size: -1
+- embedding_lr: 0.3000
+- unembedding_lr: 0.0040
+- weight_decay: 0.2000
+- matrix_lr: 0.0200
+- scalar_lr: 0.5000
+- adam_beta1: 0.8000
+- adam_beta2: 0.9500
+- warmup_ratio: 0.0000
+- warmdown_ratio: 0.5000
+- final_lr_frac: 0.0000
+- resume_from_step: -1
+- eval_every: 250
+- eval_tokens: 20,971,520
+- core_metric_every: 2000
+- core_metric_max_per_task: 500
+- sample_every: 2000
+- save_every: 1000
+- model_tag: None
+- Number of parameters: 536,911,904
+- Number of FLOPs per token: 1.660957e+09
+- Calculated number of iterations: 4704
+- Number of training tokens: 2,466,250,752
+- Tokens : Scaling params ratio: 10.4999
+- DDP world size: 8
+- warmup_ratio: 0.0000
+- warmdown_ratio: 0.5000
+- final_lr_frac: 0.0000
+- Minimum validation bpb: 0.8351
+- Final validation bpb: 0.8351
+- CORE metric estimate: 0.1802
+- MFU %: 40.98%
+- Total training flops: 4.096336e+18
+- Total training time: 21.77m
+- Peak memory usage: 27687.83MiB
+

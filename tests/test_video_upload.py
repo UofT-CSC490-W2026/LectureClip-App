@@ -3,6 +3,7 @@
 import boto3
 from moto import mock_aws
 from urllib.parse import unquote
+from unittest.mock import patch
 
 from conftest import TEST_BUCKET, TEST_USER_ID, load_lambda, make_event, parse_body
 
@@ -75,6 +76,24 @@ class TestVideoUpload:
         resp = self.mod.handler({"httpMethod": "OPTIONS"}, {})
         assert resp["statusCode"] == 200
 
+    def test_request_context_options_returns_200(self):
+        resp = self.mod.handler({"requestContext": {"http": {"method": "OPTIONS"}}}, {})
+        assert resp["statusCode"] == 200
+
     def test_cors_header_present_on_every_response(self):
         resp = self.mod.handler(make_event(VALID_BODY), {})
         assert resp["headers"]["Access-Control-Allow-Origin"] == "*"
+
+    def test_key_error_returns_400(self):
+        with patch.object(self.mod.s3_client, "generate_presigned_url", side_effect=KeyError("Bucket")):
+            resp = self.mod.handler(make_event(VALID_BODY), {})
+
+        assert resp["statusCode"] == 400
+        assert "Missing required field" in parse_body(resp)["error"]
+
+    def test_unexpected_exception_returns_500(self):
+        with patch.object(self.mod.s3_client, "generate_presigned_url", side_effect=RuntimeError("boom")):
+            resp = self.mod.handler(make_event(VALID_BODY), {})
+
+        assert resp["statusCode"] == 500
+        assert "Internal server error" in parse_body(resp)["error"]

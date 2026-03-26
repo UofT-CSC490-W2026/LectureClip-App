@@ -1,7 +1,9 @@
 """Unit tests for lambdas/process-transcribe/ (handler + utility modules)."""
 
+import decimal
 import json
 import os
+from datetime import UTC, datetime
 import boto3
 from moto import mock_aws
 
@@ -181,6 +183,25 @@ class TestDynamodbUtils:
         # Should not be empty with real DynamoDB
         assert result != {}
 
+    def test_custom_encoder_serializes_decimal_and_datetime(self):
+        payload = {
+            "count": decimal.Decimal("1.5"),
+            "updatedAt": datetime(2026, 3, 24, tzinfo=UTC),
+        }
+
+        encoded = json.dumps(payload, cls=self.du._CustomEncoder)
+        decoded = json.loads(encoded)
+
+        assert decoded["count"] == "1.5"
+        assert decoded["updatedAt"] == "2026-03-24T00:00:00+00:00"
+
+    def test_custom_encoder_raises_for_unsupported_types(self):
+        try:
+            json.dumps({"unsupported": object()}, cls=self.du._CustomEncoder)
+            assert False, "Expected unsupported object serialization to fail"
+        except TypeError:
+            pass
+
 
 @mock_aws
 class TestStepFunctionUtils:
@@ -225,6 +246,18 @@ class TestStepFunctionUtils:
         output = {"status": "COMPLETED", "transcriptUrl": TRANSCRIPT_URL}
         serialized = json.dumps(output, cls=self.sfu._DecimalEncoder)
         assert json.loads(serialized) == output
+
+    def test_send_task_success_serializes_decimal_values(self):
+        output = {"durationSeconds": decimal.Decimal("12.5")}
+        serialized = json.dumps(output, cls=self.sfu._DecimalEncoder)
+        assert json.loads(serialized) == {"durationSeconds": "12.5"}
+
+    def test_decimal_encoder_raises_for_unsupported_types(self):
+        try:
+            json.dumps({"unsupported": object()}, cls=self.sfu._DecimalEncoder)
+            assert False, "Expected unsupported object serialization to fail"
+        except TypeError:
+            pass
 
     def test_send_task_failure_calls_sfn(self):
         try:

@@ -22,24 +22,37 @@ function getTextWidth(text) {
   return text.length * 7 + 10
 }
 
-const [, , summaryPath, outputPath] = process.argv
+const [, , summaryPath, outputPath, badgeLabel] = process.argv
 
 if (!summaryPath || !outputPath) {
   console.error(
-    'Usage: node scripts/generate-coverage-badge.mjs <coverage-summary.json> <output.svg>',
+    'Usage: node scripts/generate-coverage-badge.mjs <coverage-summary.json> <output.svg> [label]',
   )
   process.exit(1)
 }
 
 const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf8'))
-const lineCoverage = Number(summary.total?.lines?.pct)
+
+function getLineCoverage(summaryData) {
+  if (summaryData?.total?.lines?.pct !== undefined) {
+    return Number(summaryData.total.lines.pct)
+  }
+
+  if (summaryData?.totals?.percent_covered !== undefined) {
+    return Number(summaryData.totals.percent_covered)
+  }
+
+  return Number.NaN
+}
+
+const lineCoverage = getLineCoverage(summary)
 
 if (Number.isNaN(lineCoverage)) {
   console.error('Could not read total line coverage from the coverage summary.')
   process.exit(1)
 }
 
-const label = 'frontend coverage'
+const label = badgeLabel || 'frontend coverage'
 const message = `${lineCoverage.toFixed(2)}%`
 const labelWidth = getTextWidth(label)
 const messageWidth = getTextWidth(message)
@@ -76,4 +89,4 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${totalWidth}" heigh
 fs.mkdirSync(path.dirname(outputPath), { recursive: true })
 fs.writeFileSync(outputPath, svg)
 
-console.log(`Wrote frontend coverage badge to ${outputPath}`)
+console.log(`Wrote ${label} badge to ${outputPath}`)
