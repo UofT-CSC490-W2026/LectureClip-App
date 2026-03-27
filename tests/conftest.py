@@ -45,6 +45,9 @@ if _QUERY_SEGMENTS_DIR not in sys.path:
 os.environ.setdefault("STATE_MACHINE_ARN", "arn:aws:states:us-east-1:123456789012:stateMachine:TestMachine")
 os.environ.setdefault("TRANSCRIBE_TABLE", "test-transcribe-table")
 os.environ.setdefault("TRANSCRIPTS_BUCKET", "test-transcripts-bucket")
+os.environ.setdefault("AURORA_CLUSTER_ARN", "arn:aws:rds:us-east-1:123456789012:cluster:test")
+os.environ.setdefault("AURORA_SECRET_ARN", "arn:aws:secretsmanager:us-east-1:123456789012:secret:test")
+os.environ.setdefault("AURORA_DB_NAME", "lectureclip")
 
 import importlib.util
 import json
