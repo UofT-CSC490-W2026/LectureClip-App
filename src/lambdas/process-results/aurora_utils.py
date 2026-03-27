@@ -97,6 +97,7 @@ def insert_segments(lecture_id, segments):
 
 
 def insert_embeddings(segment_records, embeddings, model_id):
+    # TODO: Batch the RDS execute call
     """
     Insert embedding vectors into segment_embeddings.
 
