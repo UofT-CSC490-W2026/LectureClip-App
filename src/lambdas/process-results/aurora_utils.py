@@ -70,6 +70,7 @@ def insert_segments(lecture_id, segments):
     make_segment_id = uuid.uuid5
     last_index = len(segments) - 1
 
+    # TODO: batch the insert call
     for idx, (start_s, _speaker, text) in enumerate(segments):
         start_s_float = float(start_s)
         end_s = float(segments[idx + 1][0]) if idx < last_index else start_s_float + 30.0
