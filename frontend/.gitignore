@@ -24,3 +24,8 @@ coverage
 *.sln
 *.sw?
 .vite
+
+# amplify
+.amplify
+amplify_outputs*
+amplifyconfiguration*

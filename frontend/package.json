@@ -14,10 +14,14 @@
     "coverage:badge": "node ../scripts/generate-coverage-badge.mjs ./coverage/coverage-summary.json ../.github/badges/frontend-coverage.svg"
   },
   "dependencies": {
+    "@aws-amplify/ui-react": "~6.13.2",
+    "aws-amplify": "~6.15.10",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },
   "devDependencies": {
+    "@aws-amplify/backend": "^1.22.0",
+    "@aws-amplify/backend-cli": "^1.8.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
@@ -26,8 +30,12 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "@vitest/coverage-istanbul": "^4.1.0",
+    "aws-cdk-lib": "^2.234.1",
+    "constructs": "^10.6.0",
+    "esbuild": "^0.27.4",
     "jsdom": "^29.0.1",
-    "typescript": "~5.9.3",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
     "vite": "^8.0.1",
     "vitest": "^4.1.0"
   }
