@@ -2,13 +2,19 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { queryVideo } from '@/lib/api.ts'
 import type { Segment } from '@/lib/types.ts'
+import { Button } from '@/components/ui/button.tsx'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card.tsx'
+import { Input } from '@/components/ui/input.tsx'
+import { Label } from '@/components/ui/label.tsx'
+import { ArrowLeft, Search } from 'lucide-react'
 
 type QueryPageProps = {
   videoId: string
   onQueryComplete: (segments: Segment[]) => void
+  onBack: () => void
 }
 
-export function QueryPage({ videoId, onQueryComplete }: QueryPageProps) {
+export function QueryPage({ videoId, onQueryComplete, onBack }: QueryPageProps) {
   const [query, setQuery] = useState('')
   const [isSearching, setIsSearching] = useState(false)
 
@@ -26,27 +32,50 @@ export function QueryPage({ videoId, onQueryComplete }: QueryPageProps) {
     }
   }
 
+  const filename = videoId.split('/').pop() ?? videoId
+
   return (
-    <section className="page-content">
-      <h2>Ask about the lecture</h2>
-      <p>Video ready: <strong>{videoId}</strong></p>
+    <div className="max-w-lg mx-auto space-y-6">
+      <div className="flex items-center gap-3">
+        <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2">
+          <ArrowLeft className="h-4 w-4 mr-1" />
+          Back
+        </Button>
+      </div>
 
-      <form className="page-content" onSubmit={handleSubmit}>
-        <div className="field-group">
-          <label htmlFor="lecture-query">Your query</label>
-          <input
-            id="lecture-query"
-            type="text"
-            placeholder="What did the speaker say about neural networks?"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </div>
-
-        <button className="primary-button" type="submit" disabled={!query.trim() || isSearching}>
-          {isSearching ? 'Searching...' : 'Find segments'}
-        </button>
-      </form>
-    </section>
+      <Card>
+        <CardHeader>
+          <CardTitle>Ask about this lecture</CardTitle>
+          <CardDescription className="truncate">
+            {filename}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="lecture-query">Your question</Label>
+              <Input
+                id="lecture-query"
+                type="text"
+                placeholder="What did the speaker say about neural networks?"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                autoFocus
+              />
+            </div>
+            <Button type="submit" className="w-full" disabled={!query.trim() || isSearching}>
+              {isSearching ? (
+                <>Searching…</>
+              ) : (
+                <>
+                  <Search className="h-4 w-4 mr-2" />
+                  Find segments
+                </>
+              )}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
   )
 }

@@ -11,8 +11,11 @@ export type TranscriptSegment = {
 }
 
 export type Video = {
-  id: string
-  url: string
+  lectureId: string
+  videoId: string
+  title: string
+  ingestedAt: string
+  playbackUrl: string | null
 }
 
 export type ChatSegment = {

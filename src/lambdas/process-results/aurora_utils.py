@@ -41,25 +41,29 @@ def _batch_execute(sql, parameter_sets):
     )
 
 
-def upsert_lecture(video_uri):
+def upsert_lecture(video_uri, user_id=None):
     """
     Insert a lecture row keyed by a deterministic UUID derived from video_uri.
-    Does nothing on conflict — safe to call on repeated processing of the same video.
+    Sets user_id when provided. Does nothing on conflict — safe to call on
+    repeated processing of the same video.
     Returns the lecture_id string.
     """
     lecture_id = str(uuid.uuid5(uuid.NAMESPACE_URL, video_uri))
     title = video_uri.rsplit("/", 1)[-1]
+    params = [
+        {"name": "lecture_id", "value": {"stringValue": lecture_id}},
+        {"name": "title",      "value": {"stringValue": title}},
+        {"name": "video_uri",  "value": {"stringValue": video_uri}},
+        {"name": "user_id",    "value": {"stringValue": user_id} if user_id else {"isNull": True}},
+    ]
     _execute(
         """
-        INSERT INTO lectures (lecture_id, title, video_uri)
-        VALUES (:lecture_id::uuid, :title, :video_uri)
-        ON CONFLICT (lecture_id) DO NOTHING
+        INSERT INTO lectures (lecture_id, title, video_uri, user_id)
+        VALUES (:lecture_id::uuid, :title, :video_uri, :user_id::uuid)
+        ON CONFLICT (lecture_id) DO UPDATE
+            SET user_id = COALESCE(EXCLUDED.user_id, lectures.user_id)
         """,
-        [
-            {"name": "lecture_id", "value": {"stringValue": lecture_id}},
-            {"name": "title",      "value": {"stringValue": title}},
-            {"name": "video_uri",  "value": {"stringValue": video_uri}},
-        ],
+        params,
     )
     return lecture_id
 

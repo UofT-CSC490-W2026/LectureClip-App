@@ -94,6 +94,8 @@ ALL_FUNCTIONS=(
   "query-segments|QuerySegmentsFunction"
   "query-segments-info|QuerySegmentsInfoFunction"
   "chat|ChatFunction"
+  "register-user|RegisterUserFunction"
+  "list-lectures|ListLecturesFunction"
 )
 
 # ── filter to requested function ──────────────────────────────────────────────
@@ -106,7 +108,7 @@ for entry in "${ALL_FUNCTIONS[@]}"; do
   fi
 done
 
-[[ ${#FUNCTIONS_TO_DEPLOY[@]} -eq 0 ]] && err "unknown function '$FILTER_FUNCTION'. Choose: video-upload | multipart-init | multipart-complete | s3-trigger | start-transcribe | process-transcribe | process-results | db-migrate | query-segments | query-segments-info | chat"
+[[ ${#FUNCTIONS_TO_DEPLOY[@]} -eq 0 ]] && err "unknown function '$FILTER_FUNCTION'. Choose: video-upload | multipart-init | multipart-complete | s3-trigger | start-transcribe | process-transcribe | process-results | db-migrate | query-segments | query-segments-info | chat | register-user | list-lectures"
 
 # ── summary ───────────────────────────────────────────────────────────────────
 

@@ -1,5 +1,6 @@
 import json
 import os
+import uuid
 
 import boto3
 
@@ -64,8 +65,15 @@ def handler(event, context):
     )
     print(f"Generated {len(embeddings)} embeddings")
 
-    lecture_id = upsert_lecture(media_uri)
-    print(f"Upserted lecture {lecture_id}")
+    # Derive user_id from the email embedded in the S3 key.
+    # Key format: s3://bucket/{timestamp}/{email}/{filename}
+    # Splitting on '/' gives: ['s3:', '', bucket, timestamp, email, filename]
+    uri_parts = media_uri.split('/')
+    email = uri_parts[4] if len(uri_parts) >= 5 else None
+    user_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"mailto:{email}")) if email else None
+
+    lecture_id = upsert_lecture(media_uri, user_id)
+    print(f"Upserted lecture {lecture_id} for user {email or 'unknown'}")
 
     segment_records = insert_segments(lecture_id, segments)
     print(f"Upserted {len(segment_records)} segments")

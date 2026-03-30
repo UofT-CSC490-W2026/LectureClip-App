@@ -67,6 +67,7 @@ rds_data = boto3.client("rds-data")
 # """
 
 # TODO revert this back after testing
+# The test currently fail because of this
 # removes duplication filtering for testing
 _SEARCH_SQL_ALL = """
 SELECT segment_id, start_s, end_s, idx, text, is_frame_embedding, similarity

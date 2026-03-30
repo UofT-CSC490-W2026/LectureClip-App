@@ -1,4 +1,4 @@
-import type { ChatSegment, Segment, TranscriptSegment } from '@/lib/types.ts'
+import type { ChatSegment, Segment, TranscriptSegment, Video } from '@/lib/types.ts'
 
 // Set via a build-time env variable (Vite exposes VITE_* vars to the bundle).
 // Example .env.local:  VITE_API_BASE_URL=https://abc123.execute-api.ca-central-1.amazonaws.com/dev
@@ -25,13 +25,13 @@ function validateFile(file: File): void {
     throw new Error(`File format '${ext}' is not allowed. Allowed: ${ALLOWED_FORMATS.join(', ')}`)
 }
 
-async function directUpload(file: File, onProgress?: (pct: number) => void): Promise<string> {
+async function directUpload(file: File, userId: string, onProgress?: (pct: number) => void): Promise<string> {
   const contentType = getContentType(file)
 
   const initRes = await fetch(`${API_BASE}/upload`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ filename: file.name, fileSize: file.size, contentType }),
+    body: JSON.stringify({ filename: file.name, fileSize: file.size, contentType, userId }),
   })
   if (!initRes.ok) throw new Error(`Upload init failed: ${initRes.status}`)
   const { uploadUrl, fileKey } = await initRes.json() as { uploadUrl: string; fileKey: string }
@@ -47,13 +47,13 @@ async function directUpload(file: File, onProgress?: (pct: number) => void): Pro
   return fileKey
 }
 
-async function multipartUpload(file: File, onProgress?: (pct: number) => void): Promise<string> {
+async function multipartUpload(file: File, userId: string, onProgress?: (pct: number) => void): Promise<string> {
   const contentType = getContentType(file)
 
   const initRes = await fetch(`${API_BASE}/multipart/init`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ filename: file.name, fileSize: file.size, contentType }),
+    body: JSON.stringify({ filename: file.name, fileSize: file.size, contentType, userId }),
   })
   if (!initRes.ok) throw new Error(`Multipart init failed: ${initRes.status}`)
   const { uploadId, fileKey, presignedUrls, partSize } = await initRes.json() as {
@@ -161,14 +161,31 @@ function sleep(ms: number) {
 
 export async function uploadVideo(
   file: File,
+  userId: string,
   onProgress?: (pct: number) => void,
 ): Promise<{ videoId: string }> {
   validateFile(file)
   const fileKey =
     file.size > DIRECT_UPLOAD_THRESHOLD
-      ? await multipartUpload(file, onProgress)
-      : await directUpload(file, onProgress)
+      ? await multipartUpload(file, userId, onProgress)
+      : await directUpload(file, userId, onProgress)
   return { videoId: fileKey }
+}
+
+export async function listVideos(userId: string): Promise<{ videos: Video[] }> {
+  const res = await fetch(`${API_BASE}/lectures?userId=${encodeURIComponent(userId)}`)
+  if (!res.ok) throw new Error(`Failed to load videos: ${res.status}`)
+  const data = await res.json() as { lectures: Video[] }
+  return { videos: data.lectures }
+}
+
+export async function registerUser(email: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/users/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  })
+  if (!res.ok) throw new Error(`Failed to register user: ${res.status}`)
 }
 
 export async function queryVideo(

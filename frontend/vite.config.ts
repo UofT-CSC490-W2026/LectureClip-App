@@ -2,6 +2,7 @@ import { defineConfig } from 'vitest/config'
 import type { InlineConfig } from 'vitest/node'
 import { fileURLToPath, URL } from 'node:url'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 
 const coverage = {
   provider: 'istanbul',
@@ -14,7 +15,8 @@ const coverage = {
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  define: { global: 'globalThis' },
+  plugins: [tailwindcss(), react()],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

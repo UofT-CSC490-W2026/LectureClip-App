@@ -129,6 +129,41 @@ DDL_STATEMENTS = [
     ALTER TABLE segment_embeddings
         ADD COLUMN IF NOT EXISTS is_frame_embedding BOOLEAN NOT NULL DEFAULT false
     """,
+
+    # 9. Users — registered Cognito accounts
+    """
+    CREATE TABLE IF NOT EXISTS users (
+        user_id      UUID        PRIMARY KEY,
+        email        TEXT        NOT NULL,
+        display_name TEXT,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CONSTRAINT users_email_unique UNIQUE (email)
+    )
+    """,
+
+    # 10. Associate lectures with users
+    """
+    ALTER TABLE lectures
+        ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(user_id)
+    """,
+
+    # 11. Index for fast per-user lecture listing
+    """
+    CREATE INDEX IF NOT EXISTS lectures_user_id_idx
+        ON lectures (user_id)
+    """,
+
+    # 12. Backfill user_id on lectures where the email segment of the S3 URI
+    #     already matches a registered user.
+    #     S3 URI format: s3://{bucket}/{timestamp}/{email}/{filename}
+    #     split_part(uri, '/', 5) extracts the email component.
+    """
+    UPDATE lectures
+    SET    user_id = u.user_id
+    FROM   users u
+    WHERE  lectures.user_id IS NULL
+      AND  split_part(lectures.video_uri, '/', 5) = u.email
+    """,
 ]
 
 

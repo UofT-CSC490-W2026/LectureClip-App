@@ -171,6 +171,30 @@ Resources:
           # AURORA_CLUSTER_ARN, AURORA_SECRET_ARN, AURORA_DB_NAME, EMBEDDING_DIM
           # are injected by Terraform (requires real Aurora — not for sam local invoke)
 
+  RegisterUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "lectureclip-${Environment}-register-user"
+      Handler: index.handler
+      CodeUri: src/lambdas/register-user/
+      Timeout: 10
+      Environment:
+        Variables:
+          # AURORA_CLUSTER_ARN, AURORA_SECRET_ARN, AURORA_DB_NAME
+          # are injected by Terraform (requires real Aurora — not for sam local invoke)
+
+  ListLecturesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "lectureclip-${Environment}-list-lectures"
+      Handler: index.handler
+      CodeUri: src/lambdas/list-lectures/
+      Timeout: 15
+      Environment:
+        Variables:
+          # AURORA_CLUSTER_ARN, AURORA_SECRET_ARN, AURORA_DB_NAME
+          # are injected by Terraform (requires real Aurora — not for sam local invoke)
+
   DbMigrateFunction:
     Type: AWS::Serverless::Function
     Properties:
