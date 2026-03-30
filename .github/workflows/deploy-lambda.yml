@@ -2,7 +2,7 @@ name: Deploy Lambda
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, eval]
     paths:
       - 'src/lambdas/**'
 
@@ -28,6 +28,9 @@ jobs:
           if [ "${{ github.ref_name }}" = "main" ]; then
             echo "name=prod" >> "$GITHUB_OUTPUT"
             echo "role=${{ vars.AWS_ROLE_TO_ASSUME_PROD }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.ref_name }}" = "eval" ]; then
+            echo "name=eval" >> "$GITHUB_OUTPUT"
+            echo "role=${{ vars.AWS_ROLE_TO_ASSUME_EVAL }}" >> "$GITHUB_OUTPUT"
           else
             echo "name=dev"  >> "$GITHUB_OUTPUT"
             echo "role=${{ vars.AWS_ROLE_TO_ASSUME_DEV }}" >> "$GITHUB_OUTPUT"
