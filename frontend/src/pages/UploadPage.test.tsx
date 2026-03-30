@@ -10,9 +10,9 @@ vi.mock('@/lib/api.ts', () => ({
 
 describe('UploadPage', () => {
   it('does not upload when the form is submitted without a file', () => {
-    render(<UploadPage onUploadComplete={vi.fn()} />)
+    render(<UploadPage userId="anonymous" onUploadComplete={vi.fn()} onBack={vi.fn()} />)
 
-    fireEvent.submit(screen.getByRole('button', { name: 'Upload video' }).closest('form') as HTMLFormElement)
+    fireEvent.submit(screen.getByRole('button', { name: 'Upload and continue' }).closest('form') as HTMLFormElement)
 
     expect(uploadVideo).not.toHaveBeenCalled()
   })
@@ -21,10 +21,10 @@ describe('UploadPage', () => {
     const user = userEvent.setup()
     const file = new File(['video-bytes'], 'lecture.mp4', { type: 'video/mp4' })
 
-    render(<UploadPage onUploadComplete={vi.fn()} />)
+    render(<UploadPage userId="anonymous" onUploadComplete={vi.fn()} onBack={vi.fn()} />)
 
     const input = screen.getByLabelText('Video file')
-    const submitButton = screen.getByRole('button', { name: 'Upload video' })
+    const submitButton = screen.getByRole('button', { name: 'Upload and continue' })
 
     await user.upload(input, file)
     expect(submitButton).toBeEnabled()
@@ -47,9 +47,9 @@ describe('UploadPage', () => {
         }),
     )
 
-    render(<UploadPage onUploadComplete={onUploadComplete} />)
+    render(<UploadPage userId="anonymous" onUploadComplete={onUploadComplete} onBack={vi.fn()} />)
 
-    const submitButton = screen.getByRole('button', { name: 'Upload video' })
+    const submitButton = screen.getByRole('button', { name: 'Upload and continue' })
     expect(submitButton).toBeDisabled()
 
     await user.upload(screen.getByLabelText('Video file'), file)
@@ -57,8 +57,8 @@ describe('UploadPage', () => {
 
     await user.click(submitButton)
 
-    expect(uploadVideo).toHaveBeenCalledWith(file)
-    expect(screen.getByRole('button', { name: 'Uploading...' })).toBeDisabled()
+    expect(uploadVideo).toHaveBeenCalledWith(file, 'anonymous', expect.any(Function))
+    expect(screen.getByRole('button', { name: 'Uploading…' })).toBeDisabled()
 
     resolveUpload?.({ videoId: 'vid_upload' })
 
@@ -67,7 +67,7 @@ describe('UploadPage', () => {
     })
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Upload video' })).toBeEnabled()
+      expect(screen.getByRole('button', { name: 'Upload and continue' })).toBeEnabled()
     })
   })
 })

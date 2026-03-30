@@ -22,18 +22,18 @@ describe('QueryPage', () => {
         }),
     )
 
-    render(<QueryPage videoId="vid_query" onQueryComplete={onQueryComplete} />)
+    render(<QueryPage videoId="vid_query" onQueryComplete={onQueryComplete} onBack={vi.fn()} />)
 
     const submitButton = screen.getByRole('button', { name: 'Find segments' })
     expect(submitButton).toBeDisabled()
 
-    await user.type(screen.getByLabelText('Your query'), '  neural networks  ')
+    await user.type(screen.getByLabelText('Your question'), '  neural networks  ')
     expect(submitButton).toBeEnabled()
 
     await user.click(submitButton)
 
     expect(queryVideo).toHaveBeenCalledWith('vid_query', 'neural networks')
-    expect(screen.getByRole('button', { name: 'Searching...' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Searching…' })).toBeDisabled()
 
     resolveSearch?.({ segments: nextSegments })
 

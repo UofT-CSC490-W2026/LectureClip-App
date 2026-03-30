@@ -19,7 +19,7 @@ describe('uploadVideo', () => {
       .mockResolvedValueOnce(new Response(null, { status: 200 })),
     )
 
-    const result = await uploadVideo(file)
+    const result = await uploadVideo(file, 'anonymous')
     expect(result).toEqual({ videoId: 'vid_123' })
   })
 
@@ -30,7 +30,7 @@ describe('uploadVideo', () => {
       new Response(null, { status: 500 }),
     ))
 
-    await expect(uploadVideo(file)).rejects.toThrow('Upload init failed: 500')
+    await expect(uploadVideo(file, 'anonymous')).rejects.toThrow('Upload init failed: 500')
   })
 })
 
