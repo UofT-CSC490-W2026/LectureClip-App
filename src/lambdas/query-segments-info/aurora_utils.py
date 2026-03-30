@@ -69,13 +69,14 @@ rds_data = boto3.client("rds-data")
 # TODO revert this back after testing
 # removes duplication filtering for testing
 _SEARCH_SQL_ALL = """
-SELECT segment_id, start_s, end_s, idx, text, similarity
+SELECT segment_id, start_s, end_s, idx, text, is_frame_embedding, similarity
 FROM (
     SELECT s.segment_id,
            s.start_s,
            s.end_s,
            s.idx,
            s.text,
+            se.is_frame_embedding,
            1 - (se.embedding <=> :vec::vector) AS similarity
     FROM   segment_embeddings se
     JOIN   segments s ON se.segment_id = s.segment_id
@@ -87,13 +88,14 @@ LIMIT  :k
 """
 
 _SEARCH_SQL_TEXT_ONLY = """
-SELECT segment_id, start_s, end_s, idx, text, similarity
+SELECT segment_id, start_s, end_s, idx, text, is_frame_embedding, similarity
 FROM (
     SELECT s.segment_id,
            s.start_s,
            s.end_s,
            s.idx,
            s.text,
+        se.is_frame_embedding,
            1 - (se.embedding <=> :vec::vector) AS similarity
     FROM   segment_embeddings se
     JOIN   segments s ON se.segment_id = s.segment_id
@@ -130,6 +132,8 @@ def search_segments(video_uri: str, embedding: list, k: int, include_frames: boo
     Each segment appears at most once — the highest-scoring embedding modality
     (text or frame) wins when both land in the candidate set.
     """
+    print('##########include frames is ' + str(include_frames))
+
     sql = _SEARCH_SQL_ALL if include_frames else _SEARCH_SQL_TEXT_ONLY
     vec_str = "[" + ",".join(str(v) for v in embedding) + "]"
 
@@ -158,6 +162,7 @@ def search_segments(video_uri: str, embedding: list, k: int, include_frames: boo
             "end":        float(r["end_s"]),
             "idx":        int(r["idx"]),
             "text":       r["text"],
+            "isFrameEmbedding": r["is_frame_embedding"],
             "similarity": float(r["similarity"]),
         }
         for r in rows
