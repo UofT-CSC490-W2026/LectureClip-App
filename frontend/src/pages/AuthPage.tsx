@@ -60,6 +60,7 @@ export function AuthPage({ onSignIn }: Props) {
     setError(null)
     try {
       await confirmSignUp(pendingEmail, code)
+      await registerUser(pendingEmail).catch(() => {/* non-blocking */})
       setEmail(pendingEmail)
       setPassword('')
       setView('auth')
