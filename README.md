@@ -1,105 +1,204 @@
 # LectureClip - Application
 
-Serverless AWS backend for uploading lecture videos directly to S3 and transcribing them with Amazon Transcribe.
+Full-stack lecture video platform: upload a video, let the pipeline transcribe and embed it, then search the transcript with natural language and jump directly to the relevant segments.
 
 ![Frontend coverage](.github/badges/frontend-coverage.svg)
 ![Backend coverage](.github/badges/backend-coverage.svg)
 
 ## Architecture
 
-### Video Upload
+### High-level flow
 
 ```
-Client
+Browser
   │
-  ├─ file ≤ 100 MB ──► POST /upload            ──► VideoUploadFunction
-  │                         returns presigned PUT URL
+  ├─ Auth (Cognito) ────────────────────────────────────► Cognito User Pool
   │
-  └─ file > 100 MB ──► POST /multipart/init    ──► MultipartInitFunction
-                            returns uploadId + presigned part URLs
-                        POST /multipart/complete ──► MultipartCompleteFunction
-                            finalizes upload with ETags
-```
-
-The upload Lambdas are Python 3.13, read `BUCKET_NAME` and `REGION` from environment variables, and respond with `Access-Control-Allow-Origin: *` headers.
-
-**S3 key format:** `{ISO-timestamp}/{userId}/{filename}`
-
-### Audio Transcription Pipeline
-
-Once a video lands in S3, an SNS notification triggers the transcription workflow:
-
-```
-S3 Event (via SNS)
+  ├─ Upload ──► POST /upload  or  POST /multipart/init ──► S3 (video bucket)
+  │                                                              │
+  │                                              S3 Event (SNS) │
+  │                                                              ▼
+  │                                                  Step Functions State Machine
+  │                                                  ├─ StartTranscribeFunction
+  │                                                  ├─ Amazon Transcribe (async)
+  │                                                  ├─ ProcessTranscribeFunction
+  │                                                  └─ ProcessResultsFunction
+  │                                                      ├─ text embeddings → Aurora pgvector
+  │                                                      └─ frame embeddings (ECS) → Aurora pgvector
   │
-  └──► S3TriggerFunction          filters .mp4/.mov files, starts Step Functions execution
-         │
-         └──► Step Functions State Machine
-                │
-                └──► StartTranscribeFunction   starts Transcribe job; stores task token in DynamoDB
-                           │
-                           └──► Amazon Transcribe (async)
-                                  │
-                                  └──► EventBridge (job completion)
-                                         │
-                                         └──► ProcessTranscribeFunction  signals Step Functions success/failure
+  ├─ Poll  ──► GET  /lectures ──────────────────────────► Aurora (lectures table)
+  │
+  ├─ Query ──► POST /query-info ───────────────────────► Aurora (pgvector similarity search)
+  │
+  ├─ Chat  ──► POST /chat ─────────────────────────────► Bedrock (Claude) + DynamoDB (sessions)
+  │
+  └─ Play     (local blob URL or presigned S3 URL)
 ```
 
-| Lambda | Trigger | Key env vars |
+### Frontend (`frontend/`)
+
+A Vite + React + TypeScript SPA. Routing is handled by a discriminated union `AppView` state in `App.tsx` — no router library. The user flow is:
+
+1. **AuthPage** — sign in, sign up, or confirm account via Cognito. On success transitions to the Dashboard. A persistent **Sign out** button is available at the top-right while authenticated.
+2. **DashboardPage** — lists all previously processed lectures fetched from `GET /lectures`. Clicking a lecture jumps straight to the Query page. An "Upload new" button starts a fresh upload.
+3. **UploadPage** — drag-and-drop or file-picker. Files ≤ 10 MB use `POST /upload` (presigned PUT); larger files use `POST /multipart/init` + `POST /multipart/complete` with 4-part concurrent batches.
+4. **ProcessingPage** — polls `GET /lectures` every 8 seconds waiting for the lecture to appear, which happens only after `process-results` has written embeddings to Aurora. Shows an animated status card with pipeline steps. Times out after 20 minutes.
+5. **QueryPage** — submits a natural language query to `POST /query-info`, which returns `Segment[]` with `segmentId`, `start`, `end`, `idx`, `text`, and `similarity`.
+6. **PlayerPage** — plays the video (blob URL or presigned S3 URL), displays a transcript sidebar built from segment `text` fields, and supports follow-up queries and a RAG chat panel powered by `POST /chat`.
+
+Key files:
+- `frontend/src/App.tsx` — view-state machine, auth bootstrap, session handling
+- `frontend/src/lib/api.ts` — all HTTP calls (upload, query, chat, listVideos, registerUser)
+- `frontend/src/lib/auth.ts` — Cognito wrapper (signIn, signUp, confirmSignUp, signOut, getSession)
+- `frontend/src/lib/types.ts` — `Segment`, `TranscriptSegment`, `Video` types
+- `frontend/src/components/VideoPlayer.tsx` — HTML5 video with segment-constrained playback and imperative `seekTo`/`pause` handle
+- `frontend/src/pages/` — one file per page/view
+
+### Backend lambdas (`src/lambdas/`)
+
+#### Upload lambdas
+
+| Lambda | Trigger | Description |
 |--------|---------|-------------|
-| `s3-trigger` | SNS-wrapped S3 `ObjectCreated` event | `STATE_MACHINE_ARN` |
-| `start-transcribe` | Step Functions (`waitForTaskToken`) | `TRANSCRIBE_TABLE`, `TRANSCRIPTS_BUCKET` |
-| `process-transcribe` | EventBridge (Transcribe job state change) | `TRANSCRIBE_TABLE` |
+| `video-upload` | `POST /upload` | For files ≤ 100 MB. Returns a presigned S3 PUT URL. |
+| `multipart-init` | `POST /multipart/init` | For large files. Creates a multipart upload and returns presigned part URLs. |
+| `multipart-complete` | `POST /multipart/complete` | Finalizes the multipart upload with collected ETags. |
+
+#### Transcription pipeline
+
+Triggered automatically when a video lands in S3, orchestrated by Step Functions:
+
+| Lambda | Trigger | Description |
+|--------|---------|-------------|
+| `s3-trigger` | SNS-wrapped S3 `ObjectCreated` | Filters `.mp4`/`.mov`, starts a Step Functions execution. |
+| `start-transcribe` | Step Functions (`waitForTaskToken`) | Starts an Amazon Transcribe job with speaker labels; stores task token in DynamoDB. |
+| `process-transcribe` | EventBridge (Transcribe job state change) | Reads the task token from DynamoDB and signals Step Functions success or failure. |
+| `process-results` | Step Functions (after transcription) | Fetches transcript, generates text embeddings via Bedrock/Modal, upserts lecture + segments + embeddings into Aurora. Frame embeddings are generated by a separate ECS task triggered by the same Step Function step. |
+
+#### User & lecture management
+
+| Lambda | Trigger | Description |
+|--------|---------|-------------|
+| `register-user` | `POST /register` | Upserts a user row in Aurora using `uuid5(NAMESPACE_URL, "mailto:{email}")` as the deterministic user ID. Called by the frontend on every sign-in. |
+| `list-lectures` | `GET /lectures` | Returns all lectures for a user with presigned playback URLs (1-hour TTL). The frontend polls this to detect pipeline completion. |
+| `db-migrate` | Manual / Lambda invoke | Runs schema migrations against Aurora using the RDS Data API. |
+
+#### Retrieval & chat
+
+| Lambda | Trigger | Description |
+|--------|---------|-------------|
+| `query-segments` | `POST /query` | Embeds the query, runs cosine similarity search in Aurora pgvector, returns matching segments. |
+| `query-segments-info` | `POST /query-info` | Same search with richer output: `segmentId`, `start`, `end`, `idx`, `text`, `similarity`, and optionally `isFrameEmbedding`. Supports `onlyFrames`, `textWeight`, `frameWeight` parameters. |
+| `chat` | `POST /chat` | RAG chat: embeds the query, retrieves top segments from Aurora, injects transcript context into a Claude Converse API call, persists the session in DynamoDB, and returns the answer with source segments. |
+
+### Database (Aurora PostgreSQL)
+
+Aurora Serverless v2 with pgvector. Key tables:
+
+| Table | Purpose |
+|-------|---------|
+| `users` | One row per Cognito user; keyed by deterministic `uuid5` of email. |
+| `lectures` | One row per processed video; keyed by `user_id` + `video_uri`. |
+| `segments` | Transcript segments (start/end/text) for each lecture. |
+| `segment_embeddings` | Text embeddings for each segment (pgvector). |
+| `frame_embeddings` | Per-frame visual embeddings (pgvector), populated by the ECS container. |
+
+### ECS frame embedding container (`src/container/`)
+
+A Fargate task triggered by Step Functions that extracts video frames at regular intervals and generates visual embeddings using `FRAME_EMBEDDING_MODEL_ID`. Embeddings are written to Aurora for cross-modal similarity search (text query → nearest video frames).
+
+### Modal embedding service (`modal/`)
+
+Self-hosted alternative to Bedrock for multimodal embeddings. Deploys `jinaai/jina-clip-v2` on Modal (T4 GPU). Text and image embeddings share a 1024-dim vector space, enabling cross-modal search.
+
+Key file:
+- `modal/embedder.py` — Modal app with `@modal.fastapi_endpoint` at `/embed`
+
+Request: `{ "type": "image"|"text", "data": "<base64 or string>" }`
+Response: `{ "embedding": [<1024 floats>] }`
+
+```bash
+modal deploy modal/embedder.py   # prints the endpoint URL → MODAL_EMBEDDING_URL
+```
 
 ## Repository Structure
 
 ```
 LectureClip-App/
 ├── frontend/
-│   ├── src/                       # React + Vite frontend and Vitest test files
-│   ├── package.json               # Frontend scripts, dependencies, and coverage commands
-│   └── vite.config.ts             # Vite + Vitest coverage configuration
+│   ├── src/
+│   │   ├── App.tsx                        # View-state machine + auth bootstrap
+│   │   ├── lib/
+│   │   │   ├── api.ts                     # All HTTP API calls
+│   │   │   ├── auth.ts                    # Cognito wrappers (signIn/signUp/signOut/getSession)
+│   │   │   └── types.ts                   # Segment, Video, TranscriptSegment types
+│   │   ├── components/
+│   │   │   └── VideoPlayer.tsx            # HTML5 video with segment playback + seekTo/pause handle
+│   │   ├── pages/
+│   │   │   ├── AuthPage.tsx               # Sign in / sign up / confirm flow
+│   │   │   ├── DashboardPage.tsx          # Lecture library with upload button
+│   │   │   ├── UploadPage.tsx             # File upload (direct + multipart)
+│   │   │   ├── ProcessingPage.tsx         # Pipeline polling screen (8s interval, 20min timeout)
+│   │   │   ├── QueryPage.tsx              # Natural language query input
+│   │   │   └── PlayerPage.tsx             # Video player + transcript sidebar + chat panel
+│   │   └── test/
+│   │       └── setup.ts                   # jsdom stubs (HTMLVideoElement, URL.createObjectURL)
+│   ├── package.json
+│   └── vite.config.ts                     # Vite + Vitest + coverage config
 ├── src/
 │   └── lambdas/
-│       ├── video-upload/
-│       │   └── index.py                  # POST /upload — presigned PUT URL for files ≤ 100 MB
-│       ├── multipart-init/
-│       │   └── index.py                  # POST /multipart/init — create multipart upload, return part URLs
-│       ├── multipart-complete/
-│       │   └── index.py                  # POST /multipart/complete — finalize multipart upload
-│       ├── s3-trigger/
-│       │   └── index.py                  # SNS/S3 trigger — filters video files, starts Step Functions
-│       ├── start-transcribe/
-│       │   └── index.py                  # Step Functions task — starts Transcribe job, stores token in DynamoDB
-│       └── process-transcribe/
-│           ├── index.py                  # EventBridge trigger — signals Step Functions on Transcribe completion
-│           ├── dynamodb_utils.py         # DynamoDB helpers
-│           ├── step_function_utils.py    # Step Functions signal helpers
-│           └── transcribe_utils.py      # Transcribe result parsing helpers
+│       ├── video-upload/index.py          # POST /upload — presigned PUT URL (≤ 100 MB)
+│       ├── multipart-init/index.py        # POST /multipart/init — multipart upload init
+│       ├── multipart-complete/index.py    # POST /multipart/complete — finalize multipart
+│       ├── s3-trigger/index.py            # SNS/S3 trigger → Step Functions
+│       ├── start-transcribe/index.py      # Step Functions task: start Transcribe job
+│       ├── process-transcribe/            # EventBridge: signal Step Functions on completion
+│       │   ├── index.py
+│       │   ├── dynamodb_utils.py
+│       │   ├── step_function_utils.py
+│       │   └── transcribe_utils.py
+│       ├── process-results/               # Step Functions task: embeddings → Aurora
+│       │   ├── index.py
+│       │   ├── aurora_utils.py
+│       │   ├── bedrock_utils.py
+│       │   ├── transcript_utils.py
+│       │   └── constants.py
+│       ├── register-user/index.py         # POST /register — upsert user in Aurora
+│       ├── list-lectures/index.py         # GET /lectures — list user's processed videos
+│       ├── db-migrate/index.py            # Manual invoke — run Aurora schema migrations
+│       ├── query-segments/index.py        # POST /query — vector similarity search
+│       ├── query-segments-info/           # POST /query-info — richer similarity search
+│       │   ├── index.py
+│       │   └── aurora_utils.py
+│       └── chat/                          # POST /chat — RAG chat with Claude
+│           ├── index.py
+│           ├── aurora_utils.py
+│           ├── bedrock_utils.py
+│           ├── dynamodb_utils.py
+│           └── constants.py
+├── src/container/                         # ECS Fargate: frame extraction + visual embeddings
+├── modal/
+│   └── embedder.py                        # Self-hosted jina-clip-v2 on Modal
 ├── tests/
-│   ├── conftest.py                # Shared fixtures and Lambda loader
-│   ├── test_video_upload.py       # Unit tests for POST /upload
-│   ├── test_multipart_init.py     # Unit tests for POST /multipart/init
-│   ├── test_multipart_complete.py # Unit tests for POST /multipart/complete
-│   ├── test_upload_flow.py        # End-to-end flow tests mirroring upload_video.py
-│   └── requirements.txt           # Test dependencies (pytest, boto3)
-├── events/
-│   ├── video-upload.json          # Sample event for local SAM testing
-│   ├── multipart-init.json
-│   └── multipart-complete.json
+│   ├── conftest.py                        # Shared fixtures and Lambda loader
+│   ├── test_video_upload.py
+│   ├── test_multipart_init.py
+│   ├── test_multipart_complete.py
+│   └── test_upload_flow.py
+├── events/                                # Sample SAM event payloads
 ├── scripts/
-│   ├── invoke-local.sh            # Run a Lambda locally with SAM CLI
-│   └── deploy.sh                  # Build and deploy Lambdas to AWS
+│   ├── invoke-local.sh                    # Run a Lambda locally with SAM CLI
+│   └── deploy.sh                          # Build and deploy Lambdas to AWS
 ├── .github/
 │   ├── badges/
-│   │   ├── frontend-coverage.svg  # Repository-hosted frontend coverage badge
-│   │   └── backend-coverage.svg   # Repository-hosted backend coverage badge
+│   │   ├── frontend-coverage.svg
+│   │   └── backend-coverage.svg
 │   └── workflows/
-│       ├── deploy-lambda.yml      # CI/CD — deploys on push to main when src/ changes
-│       ├── frontend-coverage.yml  # CI — runs Vitest coverage, comments on PRs, updates badge
-│       └── backend-coverage.yml   # CI — runs pytest coverage, comments on PRs, updates badge
-├── pytest.ini                     # Points pytest at tests/
-└── template.yaml                  # SAM template (local dev + CI builds)
+│       ├── deploy-lambda.yml              # CI/CD — deploys on push when src/ changes
+│       ├── frontend-coverage.yml          # Vitest coverage + PR comment + badge update
+│       └── backend-coverage.yml           # pytest coverage + PR comment + badge update
+├── pytest.ini
+└── template.yaml                          # SAM template (local dev + CI builds)
 ```
 
 ## Prerequisites
@@ -107,35 +206,57 @@ LectureClip-App/
 | Tool | Purpose |
 |------|---------|
 | AWS SAM CLI | `sam build` and `sam local invoke` |
-| Docker | Required by `sam local invoke` for Lambda containers |
-| AWS CLI | Credentials for S3 presigned URL generation and deployment |
-| Python 3.13 | Lambda runtime and CLI client |
+| Docker | Required by `sam local invoke` |
+| AWS CLI | Credentials for presigned URLs and deployment |
+| Python 3.13 | Lambda runtime |
+| Node.js 20+ | Frontend dev and test |
+
+## Environment Variables
+
+| Variable | Used by | Description |
+|----------|---------|-------------|
+| `BUCKET_NAME` | upload lambdas, list-lectures | S3 bucket for user videos |
+| `REGION` | upload lambdas, list-lectures | AWS region |
+| `STATE_MACHINE_ARN` | `s3-trigger` | Step Functions ARN to execute |
+| `TRANSCRIBE_TABLE` | `start-transcribe`, `process-transcribe` | DynamoDB table for task tokens |
+| `TRANSCRIPTS_BUCKET` | `start-transcribe` | S3 bucket for Transcribe JSON output |
+| `AURORA_CLUSTER_ARN` | all Aurora lambdas | RDS Data API cluster ARN |
+| `AURORA_SECRET_ARN` | all Aurora lambdas | Secrets Manager secret for DB credentials |
+| `AURORA_DB_NAME` | all Aurora lambdas | Database name (default: `lectureclip`) |
+| `EMBEDDING_MODEL_ID` | `process-results`, `query-segments`, `query-segments-info`, `chat` | Embedding model selection |
+| `FRAME_EMBEDDING_MODEL_ID` | ECS container | Frame embedding model selection |
+| `EMBEDDING_DIM` | embedding lambdas + ECS | Vector dimensionality (default: `1024`) |
+| `MODAL_EMBEDDING_URL` | embedding lambdas + ECS | Required when using `modal-jina-clip-v2` |
+| `CHAT_SESSIONS_TABLE` | `chat` | DynamoDB table for conversation sessions |
+| `CHAT_MODEL_ID` | `chat` | Claude model ID for chat responses |
+
+**Embedding model values:**
+- `amazon.titan-embed-image-v1` — AWS Bedrock Titan (default)
+- `modal-jina-clip-v2` — self-hosted jina-clip-v2 on Modal
+
+**S3 key format:** `{ISO-timestamp}/{userId}/{filename}`
 
 ## Local Development
 
-### Invoke a function locally
+### Frontend
 
 ```bash
-# All three functions — uses the default event file in events/
-LECTURECLIP_BUCKET=my-dev-bucket ./scripts/invoke-local.sh video-upload
-LECTURECLIP_BUCKET=my-dev-bucket ./scripts/invoke-local.sh multipart-init
-LECTURECLIP_BUCKET=my-dev-bucket ./scripts/invoke-local.sh multipart-complete
-
-# Override the event payload
-./scripts/invoke-local.sh video-upload --event events/video-upload.json
-
-# Override the bucket inline
-./scripts/invoke-local.sh multipart-init --bucket my-other-bucket
+cd frontend
+npm install
+npm run dev      # Vite dev server
+npm run build    # TypeScript check + production build
 ```
 
-The script:
-1. Resolves the SAM logical function name from the short name (e.g. `video-upload` → `VideoUploadFunction`)
-2. Writes a temporary env-vars JSON with `BUCKET_NAME` and `REGION`
-3. Runs `sam local invoke` against `template.yaml`
+### Backend
 
-### Build
+Prerequisites: AWS SAM CLI, Docker, AWS credentials.
 
 ```bash
+# Invoke a function locally
+LECTURECLIP_BUCKET=my-bucket ./scripts/invoke-local.sh video-upload
+LECTURECLIP_BUCKET=my-bucket ./scripts/invoke-local.sh multipart-init
+LECTURECLIP_BUCKET=my-bucket ./scripts/invoke-local.sh multipart-complete
+
 # Build all functions
 sam build --template template.yaml
 
@@ -143,206 +264,59 @@ sam build --template template.yaml
 sam build VideoUploadFunction --template template.yaml
 ```
 
-Build output lands in `.aws-sam/build/`.
-
-### Event payloads
-
-Sample payloads live in `events/`. Edit them to test different inputs:
-
-```json
-// events/video-upload.json
-{
-  "httpMethod": "POST",
-  "body": "{\"filename\": \"lecture.mp4\", \"userId\": \"user-123\", \"contentType\": \"video/mp4\"}"
-}
-
-// events/multipart-init.json — fileSize in bytes
-{
-  "httpMethod": "POST",
-  "body": "{\"filename\": \"large-lecture.mp4\", \"userId\": \"user-123\", \"contentType\": \"video/mp4\", \"fileSize\": 524288000}"
-}
-
-// events/multipart-complete.json — fill in real uploadId and ETags from a prior init call
-{
-  "httpMethod": "POST",
-  "body": "{\"fileKey\": \"...\", \"uploadId\": \"REPLACE\", \"parts\": [{\"PartNumber\": 1, \"ETag\": \"REPLACE\"}]}"
-}
-```
-
-Files ≤ 100 MB → direct upload via `/upload`.
-Files > 100 MB → multipart upload via `/multipart/init` + `/multipart/complete`, uploading 100 MB parts in sequence.
-
-Supported formats: `mp4`, `mov`, `avi`, `webm`, `mpeg`, `mkv`
-
 ## Tests
 
-Unit tests cover each Lambda handler and an end-to-end flow that mirrors `upload_video.py`. No AWS credentials or network access required — boto3 is mocked with `unittest.mock`.
-
-## Performance Profiling
-
-Backend profiling notes, hotspot rationale, and measured before/after results live in [`PERFORMANCE_PROFILING.md`](PERFORMANCE_PROFILING.md).
-
 ### Frontend (Vitest)
-
-The frontend uses Vitest with Testing Library and `@vitest/coverage-istanbul`.
 
 ```bash
 cd frontend
 npm install
 
-# Watch mode
-npm test
-
-# Single run
-npm run test:run
-
-# Coverage (text + html + lcov + json-summary)
-npm run test:coverage
-
-# Refresh the repository-hosted coverage badge locally
-npm run coverage:badge
+npm test                   # watch mode
+npm run test:run           # single run
+npm run test:coverage      # coverage (text + html + lcov + json-summary)
+npm run test:coverage:ci   # CI mode (verbose reporter)
 ```
 
-Coverage output lands in `frontend/coverage/`.
+Tests use Vitest + `@testing-library/react` with a jsdom environment. `src/test/setup.ts` stubs browser APIs that jsdom does not implement.
 
-`.github/workflows/frontend-coverage.yml` runs automatically for frontend pushes and pull requests, uploads the coverage report as a workflow artifact, posts a coverage summary comment on non-fork PRs, and updates `.github/badges/frontend-coverage.svg` on pushes to `main`.
+Coverage is tracked by `.github/workflows/frontend-coverage.yml` — runs on every push/PR touching `frontend/`, comments coverage on PRs, and updates `.github/badges/frontend-coverage.svg` on pushes to `main`.
 
-### Backend Setup
+### Backend (pytest)
 
 ```bash
 python -m venv venv
 source venv/bin/activate
 pip install -r tests/requirements.txt
-```
 
-### Backend Run
-
-```bash
-# All tests
-pytest
-
-# A specific file
-pytest tests/test_upload_flow.py
-
-# Verbose output
-pytest -v
-
-# Coverage (terminal + html + xml + json summary)
-pytest \
-  --cov \
+python -m pytest           # run all tests
+python -m pytest -v        # verbose
+python -m pytest --cov \
   --cov-report=term-missing \
   --cov-report=html:backend-coverage/html \
   --cov-report=xml:backend-coverage/coverage.xml \
   --cov-report=json:backend-coverage/coverage-summary.json
-
-# Refresh the repository-hosted backend coverage badge locally
-node scripts/generate-coverage-badge.mjs backend-coverage/coverage-summary.json .github/badges/backend-coverage.svg "backend coverage"
 ```
 
-Coverage output lands in `backend-coverage/`.
+`conftest.py` sets all required environment variables (including `AWS_DEFAULT_REGION`) and adds `src/lambdas/process-transcribe/` to `sys.path`. Lambda modules are loaded via `load_lambda("function-dir-name")` which uses `importlib` to handle hyphenated directory names.
 
-`.github/workflows/backend-coverage.yml` runs automatically for backend pushes and pull requests, uploads the coverage report as a workflow artifact, posts a coverage summary comment on non-fork PRs, and updates `.github/badges/backend-coverage.svg` on pushes to `main`.
+Coverage is tracked by `.github/workflows/backend-coverage.yml`.
 
-### Test layout
+### Backend test layout
 
 | File | What it tests |
 |------|--------------|
 | `test_video_upload.py` | `POST /upload` — presigned URL params, content-type validation, CORS |
-| `test_multipart_init.py` | `POST /multipart/init` — part count math, sequential part numbers, validation |
+| `test_multipart_init.py` | `POST /multipart/init` — part count math, validation |
 | `test_multipart_complete.py` | `POST /multipart/complete` — S3 call params, missing field rejection |
-| `test_upload_flow.py` | Full direct and multipart flows calling handlers in sequence, as `upload_video.py` does |
-
-### Writing a new test
-
-Each test file loads its Lambda handler once at module level using `load_lambda()` from `conftest.py`, then patches the module-level `s3_client` per test:
-
-```python
-from conftest import load_lambda, make_event, parse_body
-from unittest.mock import patch
-
-mod = load_lambda("my-new-function")
-
-def test_something(mock_s3):
-    mock_s3.some_method.return_value = {"Key": "value"}
-    with patch.object(mod, "s3_client", mock_s3):
-        resp = mod.handler(make_event({"field": "value"}), {})
-    assert resp["statusCode"] == 200
-```
-
-## Adding a New Lambda
-
-1. **Create the function directory and handler:**
-
-   ```bash
-   mkdir src/lambdas/my-new-function
-   # create src/lambdas/my-new-function/index.py with a handler(event, context) function
-   ```
-
-2. **Register it in `template.yaml`:**
-
-   ```yaml
-   MyNewFunction:
-     Type: AWS::Serverless::Function
-     Properties:
-       FunctionName: !Sub "lectureclip-${Environment}-my-new-function"
-       Handler: index.handler
-       CodeUri: src/lambdas/my-new-function/
-   ```
-
-   The `Globals` block already sets `Runtime: python3.13`, `Timeout: 30`, and injects `BUCKET_NAME` / `REGION` as environment variables — no need to repeat those. The `Environment` SAM parameter is set to `dev` or `prod` at build time.
-
-3. **Add a sample event payload:**
-
-   ```bash
-   # create events/my-new-function.json
-   ```
-
-4. **Register it in `scripts/deploy.sh`** by adding an entry to `ALL_FUNCTIONS`:
-
-   ```bash
-   "my-new-function|MyNewFunction"
-   ```
-
-   The Lambda function name is derived automatically as `lectureclip-{env}-my-new-function` at deploy time.
-
-5. **Register it in `scripts/invoke-local.sh`** by adding a case in the function resolver:
-
-   ```bash
-   my-new-function)
-     SAM_FUNCTION="MyNewFunction"
-     DEFAULT_EVENT="events/my-new-function.json"
-     ;;
-   ```
-
-6. **Add a deploy job to `.github/workflows/deploy-lambda.yml`** following the pattern of the existing jobs: add `needs: resolve-env`, use `needs.resolve-env.outputs.role` for the IAM role, and set the function name to `lectureclip-${{ needs.resolve-env.outputs.env_name }}-my-new-function`.
-
-7. **Add tests in `tests/`** — create `tests/test_my_new_function.py` following the pattern of the existing test files: load the handler with `load_lambda("my-new-function")`, patch `s3_client`, and call `mod.handler(make_event({...}), {})`.
-
-8. **Test locally:**
-
-   ```bash
-   LECTURECLIP_BUCKET=my-bucket ./scripts/invoke-local.sh my-new-function
-   ```
+| `test_upload_flow.py` | Full direct and multipart flows mirroring `upload_video.py` |
 
 ## Embedding Models
 
-The embedding pipeline supports three interchangeable models, selected via `EMBEDDING_MODEL_ID` (lambdas) and `FRAME_EMBEDDING_MODEL_ID` (ECS container):
-
-| Model ID | Provider | Modalities |
-|---|---|---|
-| `amazon.titan-embed-image-v1` | AWS Bedrock | image |
-| `modal-jina-clip-v2` | Self-hosted on Modal | image + text (shared space) |
-
-### Self-hosted Modal embedding service
-
-`modal/embedder.py` deploys `jinaai/jina-clip-v2` (1024-dim, T4 GPU) as a web endpoint. Text and image embeddings share a vector space, enabling cross-modal similarity search.
-
-```bash
-# Deploy (requires Modal CLI + authenticated workspace)
-modal deploy modal/embedder.py
-```
-
-The printed URL becomes `MODAL_EMBEDDING_URL`.
+| Model ID | Provider |
+|----------|----------|
+| `amazon.titan-embed-image-v1` | AWS Bedrock |
+| `modal-jina-clip-v2` | Self-hosted on Modal |
 
 ### Switching models at deploy time
 
@@ -351,16 +325,13 @@ The printed URL becomes `MODAL_EMBEDDING_URL`.
 ./scripts/deploy.sh --env dev \
   --embedding-model-id modal-jina-clip-v2 \
   --modal-embedding-url https://<workspace>--lectureclip-embeddings-embedder-embed.modal.run
-
-# Switch back to Bedrock Cohere
-./scripts/deploy.sh --env dev --embedding-model-id "global.cohere.embed-v4:0"
 ```
 
-When either embedding flag is passed, the script updates `EMBEDDING_MODEL_ID` and `MODAL_EMBEDDING_URL` on `process-results`, `query-segments`, and `query-segments-info` via `update-function-configuration`, without overwriting other Terraform-managed env vars.
+When either embedding flag is passed, the script merges those values into the env vars of `process-results`, `query-segments`, and `query-segments-info` via `update-function-configuration`, without overwriting other Terraform-managed env vars (e.g. `AURORA_*`).
 
 ## Deployment
+
 ### Authenticate with SSO
-If using AWS SSO, run:
 
 ```bash
 aws sso login --profile <your-profile-name>
@@ -369,15 +340,15 @@ export AWS_PROFILE=<your-profile-name>
 
 ### Automated (CI/CD)
 
-Pushing to `main` or `develop` with changes under `src/lambdas/` triggers `.github/workflows/deploy-lambda.yml`. A `resolve-env` job maps the branch to the target environment (`develop` → dev, `main` → prod), then each Lambda is built and deployed in a separate parallel job using the appropriate role and the `lectureclip-{env}-{function}` naming convention.
+Pushing to `main` or `develop` with changes under `src/lambdas/` triggers `.github/workflows/deploy-lambda.yml`. A `resolve-env` job maps the branch to the target environment (`develop` → dev, `main` → prod), then each Lambda is built and deployed in parallel using the appropriate IAM role.
 
-Required GitHub Actions variables (set under Settings → Variables):
+Required GitHub Actions variables:
 
 | Variable | Description |
 |----------|-------------|
 | `AWS_REGION` | e.g. `ca-central-1` |
-| `AWS_ROLE_TO_ASSUME_DEV` | IAM role ARN for OIDC federation (dev environment) |
-| `AWS_ROLE_TO_ASSUME_PROD` | IAM role ARN for OIDC federation (prod environment) |
+| `AWS_ROLE_TO_ASSUME_DEV` | IAM role ARN for OIDC federation (dev) |
+| `AWS_ROLE_TO_ASSUME_PROD` | IAM role ARN for OIDC federation (prod) |
 
 ### Manual
 
@@ -395,11 +366,25 @@ Required GitHub Actions variables (set under Settings → Variables):
 ./scripts/deploy.sh --env prod --region us-east-1
 
 # Use a specific AWS profile
-AWS_PROFILE=prod ./scripts/deploy.sh --env prod --function multipart-init
+AWS_PROFILE=prod ./scripts/deploy.sh --env prod --function chat
 ```
 
+Lambda function names follow the pattern `lectureclip-{env}-{function}` (e.g. `lectureclip-dev-chat`).
+
 The deploy script:
-1. Runs `sam build --parameter-overrides Environment={env}` (installs any `requirements.txt` into the build artifact)
+1. Runs `sam build --parameter-overrides Environment={env}`
 2. Zips the build output
-3. Calls `aws lambda update-function-code --zip-file` directly to `lectureclip-{env}-{function}` and waits for the update to propagate
-4. If `--embedding-model-id` or `--modal-embedding-url` is passed, merges those values into the env vars of `process-results`, `query-segments`, and `query-segments-info` via `update-function-configuration`
+3. Calls `aws lambda update-function-code --zip-file` and waits for propagation
+4. If `--embedding-model-id` or `--modal-embedding-url` is passed, updates env vars on `process-results`, `query-segments`, and `query-segments-info`
+
+### Modal embedding service
+
+```bash
+modal deploy modal/embedder.py
+```
+
+Requires Modal CLI (`pip install modal`) and an authenticated workspace (`modal token new`).
+
+## Performance Profiling
+
+Backend profiling notes, hotspot rationale, and measured before/after results live in [`PERFORMANCE_PROFILING.md`](PERFORMANCE_PROFILING.md).

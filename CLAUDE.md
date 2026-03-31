@@ -4,48 +4,97 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-LectureClip is a full-stack video processing application. The backend is serverless on AWS, handling video uploads via presigned S3 URLs and automatically transcribing uploaded videos using Amazon Transcribe, orchestrated with AWS Step Functions. The frontend is a React SPA that lets users upload videos, query transcripts, and watch relevant segments.
+LectureClip is a full-stack video processing application. The backend is serverless on AWS, handling video uploads via presigned S3 URLs, transcribing uploaded videos with Amazon Transcribe, generating text and frame embeddings stored in Aurora pgvector, and serving natural language queries and RAG chat via Lambda. The frontend is a React SPA that lets users authenticate, upload videos, wait for pipeline completion, query transcripts, and watch relevant segments with an AI chat panel.
 
 ## Architecture
 
 ### Frontend (`frontend/`)
 
-A Vite + React 19 + TypeScript SPA. The user flow is:
+A Vite + React 19 + TypeScript SPA. Routing is a discriminated union `AppView` state in `App.tsx` — no router library. The user flow is:
 
-1. **UploadPage** — selects a video file and calls `uploadVideo(file)` (currently mocked).
-2. **QueryPage** — submits a natural language query, calls `queryVideo(videoId, query)` which returns `Segment[]` (start/end timestamps).
-3. **PlayerPage** — creates a local blob URL from the `File` object and plays the video client-side. Loads transcript via `getTranscript(videoId)`. Renders `VideoPlayer` with segment navigation and a transcript sidebar.
-
-All API calls live in `frontend/src/lib/api.ts` and are **currently mocked** (no real HTTP requests). The video is never uploaded to S3 from the frontend yet — playback uses a local blob URL.
+1. **AuthPage** — Cognito sign-in / sign-up / confirm-account flow. On success calls `registerUser` to upsert the user in Aurora, then transitions to Dashboard.
+2. **DashboardPage** — Lists processed lectures from `GET /lectures`. Clicking a lecture goes to QueryPage; "Upload new" goes to UploadPage.
+3. **UploadPage** — File picker with drag-and-drop. Files ≤ 10 MB use direct upload (`POST /upload`); larger files use multipart (`POST /multipart/init` → concurrent 4-part batches → `POST /multipart/complete`).
+4. **ProcessingPage** — Polls `listVideos(userId)` every 8 seconds. Calls `onProcessingComplete` when `video.videoId.endsWith(videoId)` matches (DB stores full `s3://bucket/key` URI; upload returns just the key). 20-minute timeout with animated pipeline status card. Cancel button returns to Dashboard.
+5. **QueryPage** — Natural language query input, calls `queryVideo(videoId, query)` which hits `POST /query-info`, returns `Segment[]`.
+6. **PlayerPage** — Plays the video (blob URL when `file` is provided, else `videoUrl` presigned URL). Transcript sidebar is built from segment `text` fields (no separate transcript API call). Re-query input and a RAG chat panel (`POST /chat`) are in the sidebar.
 
 Key files:
-- `frontend/src/lib/api.ts` — API layer (upload, query, transcript)
-- `frontend/src/lib/types.ts` — `Segment`, `TranscriptSegment`, `Video` types
-- `frontend/src/components/VideoPlayer.tsx` — HTML5 video with segment playback logic
-- `frontend/src/pages/` — `UploadPage`, `QueryPage`, `PlayerPage`
+- `frontend/src/App.tsx` — view-state machine, session bootstrap, Sign out button
+- `frontend/src/lib/api.ts` — `uploadVideo`, `queryVideo` (→ `/query-info`), `chatVideo`, `listVideos`, `registerUser`
+- `frontend/src/lib/auth.ts` — Cognito wrappers via `amazon-cognito-identity-js`: `signIn`, `signUp`, `confirmSignUp`, `signOut`, `getSession`
+- `frontend/src/lib/types.ts` — `Segment` (`segmentId`, `start`, `end`, `idx`, `text`, `similarity`), `TranscriptSegment`, `Video`
+- `frontend/src/components/VideoPlayer.tsx` — HTML5 video with segment-constrained playback; exposes imperative `pause()` and `seekTo(seconds)` via `useImperativeHandle`
+- `frontend/src/pages/` — one file per view
+
+### `Segment` type
+
+```ts
+export type Segment = {
+  segmentId: string
+  start: number
+  end: number
+  idx: number
+  text: string
+  similarity: number
+}
+```
+
+All test fixtures that include `Segment` values must include all six fields.
+
+### Auth pattern (Cognito)
+
+`auth.ts` wraps `amazon-cognito-identity-js` using a module-level `CognitoUserPool` instance. When mocking in tests, use `vi.hoisted()` to create shared mock objects that can be referenced inside the `vi.mock()` factory (which is hoisted before imports). Constructor mocks must use regular `function` syntax (not arrow functions) to satisfy Vitest's `new` call:
+
+```ts
+const mockUserPool = vi.hoisted(() => ({ getCurrentUser: vi.fn(), signUp: vi.fn() }))
+vi.mock('amazon-cognito-identity-js', () => ({
+  CognitoUserPool: vi.fn(function () { return mockUserPool }),
+  CognitoUser: vi.fn(function () { return mockCognitoUser }),
+  ...
+}))
+```
 
 ### Backend lambdas (`src/lambdas/`)
 
-### Upload lambdas (`src/lambdas/`)
+#### Upload lambdas
 
-1. **`video-upload/`** — `POST /upload`: For files ≤100 MB. Returns a single presigned `PUT` URL for direct S3 upload.
-2. **`multipart-init/`** — `POST /multipart/init`: For files >100 MB. Creates an S3 multipart upload and returns presigned URLs for each 100 MB part.
-3. **`multipart-complete/`** — `POST /multipart/complete`: Finalizes a multipart upload by calling `complete_multipart_upload` with the ETags from each part.
+1. **`video-upload/`** — `POST /upload`: For files ≤ 100 MB. Returns a single presigned `PUT` URL.
+2. **`multipart-init/`** — `POST /multipart/init`: Creates an S3 multipart upload; returns presigned URLs for each part.
+3. **`multipart-complete/`** — `POST /multipart/complete`: Finalizes the multipart upload with collected ETags.
 
-### Transcription pipeline (`src/lambdas/`)
+#### Transcription pipeline
 
-Triggered automatically when a video lands in S3, orchestrated by a Step Functions state machine:
+Triggered automatically when a video lands in S3, orchestrated by Step Functions:
 
-4. **`s3-trigger/`** — Receives S3 (or SNS-wrapped S3) events, filters for video files (`.mp4`, `.mov`), and starts a Step Functions execution.
-5. **`start-transcribe/`** — Step Functions task: starts an Amazon Transcribe job with speaker labels and language identification, stores job metadata in DynamoDB.
-6. **`process-transcribe/`** — Triggered by EventBridge when a Transcribe job reaches a terminal state. Reads the task token from DynamoDB and signals Step Functions with success or failure.
-   - `transcribe_utils.py` — fetches job details from the Transcribe API.
-   - `dynamodb_utils.py` — generic `update_item` helper with expression builder.
-   - `step_function_utils.py` — `send_task_success` / `send_task_failure` wrappers.
+4. **`s3-trigger/`** — Receives S3 (or SNS-wrapped S3) events, filters `.mp4`/`.mov`, starts a Step Functions execution.
+5. **`start-transcribe/`** — Step Functions task: starts Amazon Transcribe job with speaker labels and language identification; stores task token in DynamoDB.
+6. **`process-transcribe/`** — Triggered by EventBridge when Transcribe job reaches a terminal state. Reads task token from DynamoDB and signals Step Functions.
+   - `transcribe_utils.py` — fetches job details from Transcribe API
+   - `dynamodb_utils.py` — generic `update_item` helper
+   - `step_function_utils.py` — `send_task_success` / `send_task_failure`
+7. **`process-results/`** — Step Functions task: fetches transcript, generates text embeddings (Bedrock or Modal), upserts lecture + segments + embeddings into Aurora pgvector. Frame embeddings are generated by an ECS Fargate container triggered in the same state machine.
+
+#### User & lecture management
+
+8. **`register-user/`** — `POST /register`: Upserts a user row in Aurora. User ID is `uuid5(NAMESPACE_URL, "mailto:{email}")` — identical derivation used by `process-results` and `list-lectures` so all three agree without explicit ID exchange.
+9. **`list-lectures/`** — `GET /lectures`: Returns all lectures for a user with 1-hour presigned playback URLs. The frontend polls this endpoint to detect pipeline completion.
+10. **`db-migrate/`** — Manual Lambda invoke to run Aurora schema migrations via the RDS Data API.
+
+#### Retrieval & chat
+
+11. **`query-segments/`** — `POST /query`: Embeds the query, runs cosine similarity search in Aurora, returns matching segments (basic shape).
+12. **`query-segments-info/`** — `POST /query-info`: Same search with richer output. The `aurora_utils.py` supports three SQL modes:
+    - `_SEARCH_SQL_ALL` — weighted average of text and frame cosine similarities
+    - `_SEARCH_SQL_TEXT_ONLY` — text embeddings only with `DISTINCT ON` deduplication
+    - `_SEARCH_SQL_FRAMES_ONLY` — frame embeddings only with `DISTINCT ON` deduplication
+    - `search_segments(query_vector, lecture_id, only_frames, text_weight, frame_weight)`
+    - `isFrameEmbedding` field is only included in results when the frame embedding column is present.
+13. **`chat/`** — `POST /chat`: RAG pipeline — embed query → pgvector similarity search → inject transcript context into Claude Converse API → persist session in DynamoDB → return answer + source segments.
 
 ### Modal embedding service (`modal/`)
 
-Self-hosted alternative to Bedrock for multimodal embeddings. Deploys `jinaai/jina-clip-v2` on Modal (T4 GPU) as a web endpoint that returns 1024-dim embeddings for both images and text in a shared vector space, enabling cross-modal similarity search (text query → nearest video frames).
+Self-hosted alternative to Bedrock for multimodal embeddings. Deploys `jinaai/jina-clip-v2` on Modal (T4 GPU) as a web endpoint returning 1024-dim embeddings for images and text in a shared vector space.
 
 Key file:
 - `modal/embedder.py` — Modal app: `Embedder` class with `@modal.fastapi_endpoint` at `/embed`
@@ -57,21 +106,26 @@ Deploy: `modal deploy modal/embedder.py` — the printed endpoint URL becomes `M
 
 ### Other
 
-`upload_video.py` is a CLI client that calls the upload endpoints through API Gateway, automatically choosing direct vs. multipart based on whether the file exceeds 100 MB. It uses the `requests` library (see `requirements.txt`).
+`upload_video.py` is a CLI client that calls the upload endpoints through API Gateway, automatically choosing direct vs. multipart based on file size (> 100 MB threshold). It uses the `requests` library (see `requirements.txt`).
 
 ### Environment variables
 
 | Variable | Used by |
 |---|---|
-| `BUCKET_NAME` | upload lambdas |
-| `REGION` | upload lambdas |
+| `BUCKET_NAME` | upload lambdas, list-lectures |
+| `REGION` | upload lambdas, list-lectures |
 | `STATE_MACHINE_ARN` | `s3-trigger` |
 | `TRANSCRIBE_TABLE` | `start-transcribe`, `process-transcribe` |
 | `TRANSCRIPTS_BUCKET` | `start-transcribe` |
-| `EMBEDDING_MODEL_ID` | `process-results`, `query-segments`, `query-segments-info` |
+| `AURORA_CLUSTER_ARN` | all Aurora lambdas |
+| `AURORA_SECRET_ARN` | all Aurora lambdas |
+| `AURORA_DB_NAME` | all Aurora lambdas (default: `lectureclip`) |
+| `EMBEDDING_MODEL_ID` | `process-results`, `query-segments`, `query-segments-info`, `chat` |
 | `FRAME_EMBEDDING_MODEL_ID` | ECS container (`src/container/`) |
-| `EMBEDDING_DIM` | `process-results`, `query-segments`, `query-segments-info`, ECS container |
-| `MODAL_EMBEDDING_URL` | all embedding lambdas + ECS container (required when model is `modal-jina-clip-v2`) |
+| `EMBEDDING_DIM` | embedding lambdas + ECS (default: `1024`) |
+| `MODAL_EMBEDDING_URL` | embedding lambdas + ECS (required when model is `modal-jina-clip-v2`) |
+| `CHAT_SESSIONS_TABLE` | `chat` |
+| `CHAT_MODEL_ID` | `chat` |
 
 **Embedding model values** (`EMBEDDING_MODEL_ID` / `FRAME_EMBEDDING_MODEL_ID`):
 - `amazon.titan-embed-image-v1` — Bedrock Titan (default)
@@ -90,9 +144,9 @@ python -m pytest -v       # verbose
 python -m pytest --cov --cov-report=term-missing --cov-report=html:backend-coverage/html --cov-report=xml:backend-coverage/coverage.xml --cov-report=json:backend-coverage/coverage-summary.json
 ```
 
-Tests live in `tests/`. `conftest.py` sets all required environment variables (including `AWS_DEFAULT_REGION` for boto3) and adds `src/lambdas/process-transcribe/` to `sys.path` so its sibling modules are importable. Lambda modules are loaded via `load_lambda("function-dir-name")` which uses `importlib` to handle the hyphenated directory names.
+Tests live in `tests/`. `conftest.py` sets all required environment variables (including `AWS_DEFAULT_REGION` for boto3) and adds `src/lambdas/process-transcribe/` to `sys.path` so its sibling modules are importable. Lambda modules are loaded via `load_lambda("function-dir-name")` which uses `importlib` to handle hyphenated directory names.
 
-Coverage is tracked by a GitHub Actions workflow (`.github/workflows/backend-coverage.yml`) which runs on backend pushes/PRs, comments coverage on PRs, and updates the badge at `.github/badges/backend-coverage.svg`.
+Coverage is tracked by `.github/workflows/backend-coverage.yml`.
 
 ### Frontend
 
@@ -104,9 +158,30 @@ npm run test:coverage      # with coverage report
 npm run test:coverage:ci   # CI mode (verbose reporter)
 ```
 
-Tests use **Vitest** + `@testing-library/react` with a jsdom environment. Test files sit alongside source files (`*.test.tsx` / `*.test.ts`). `src/test/setup.ts` stubs browser APIs (`HTMLVideoElement.play/pause`, `URL.createObjectURL/revokeObjectURL`, `scrollIntoView`) that jsdom does not implement.
+Tests use **Vitest** + `@testing-library/react` with a jsdom environment. Test files sit alongside source files (`*.test.tsx` / `*.test.ts`). `src/test/setup.ts` stubs browser APIs (`HTMLVideoElement.play/pause`, `URL.createObjectURL/revokeObjectURL`, `scrollIntoView`).
 
-Coverage is tracked by a GitHub Actions workflow (`.github/workflows/frontend-coverage.yml`) which runs on every push/PR touching `frontend/`, comments coverage on PRs, and updates the badge at `.github/badges/frontend-coverage.svg`.
+#### Frontend test file index
+
+| Test file | What it covers |
+|-----------|----------------|
+| `App.test.tsx` | View transitions, auth bootstrap, sign-in/sign-out, session loading spinner |
+| `lib/auth.test.ts` | Cognito wrappers: signIn, signUp, confirmSignUp, signOut, getSession (all branches) |
+| `lib/api.test.ts` | uploadVideo (direct + multipart), queryVideo, chatVideo, listVideos, registerUser |
+| `pages/AuthPage.test.tsx` | Sign-in form, sign-up tab, confirm screen, error states, back button |
+| `pages/DashboardPage.test.tsx` | Skeleton loading, video cards, empty state, error state, onSelectVideo, onUploadNew |
+| `pages/UploadPage.test.tsx` | File selection, upload triggers |
+| `pages/ProcessingPage.test.tsx` | Polling, match detection, mismatch no-op, cancel button, 20-min timeout, transient error retry |
+| `pages/QueryPage.test.tsx` | Query submission, segment display |
+| `pages/PlayerPage.test.tsx` | Transcript sidebar, re-query, videoUrl fallback, chat success, chat error |
+| `components/VideoPlayer.test.tsx` | Segment playback, segment advance, pause at end, free-play mode, seekTo, pause handle |
+
+#### ProcessingPage test notes
+
+`ProcessingPage.test.tsx` is split into two `describe` blocks:
+- **Basic behaviour** — uses real timers; `waitFor` is safe for initial poll and cancel button.
+- **Timeout** — uses `vi.useFakeTimers()` + `vi.setSystemTime()`. Advance time with `vi.advanceTimersByTime(8001)` followed by `await Promise.resolve()` inside `act()`. Use `element.click()` instead of `userEvent.click` inside fake-timer context to avoid hangs.
+
+Coverage is tracked by `.github/workflows/frontend-coverage.yml`.
 
 ## Local Development
 
@@ -121,7 +196,7 @@ npm run build    # TypeScript check + production build
 
 ### Backend
 
-Prerequisites: AWS SAM CLI, Docker (for `sam local invoke`), AWS credentials with access to a real S3 bucket (presigned URLs require real credentials).
+Prerequisites: AWS SAM CLI, Docker (for `sam local invoke`), AWS credentials with access to a real S3 bucket.
 
 ```bash
 # Invoke a function locally against a real S3 bucket
@@ -139,13 +214,13 @@ sam build --template template.yaml
 sam build VideoUploadFunction --template template.yaml
 ```
 
-Sample event payloads live in `events/`. There is currently no `events/multipart-complete.json`; it must be created manually with `fileKey`, `uploadId`, and `parts` fields.
+Sample event payloads live in `events/`.
 
 ## Deployment
 
 CI/CD deploys automatically when files under `src/lambdas/` change (`.github/workflows/deploy-lambda.yml`). Branch determines target environment: `develop` → dev, `main` → prod. Each Lambda is deployed independently. Required GitHub Actions variables: `AWS_REGION`, `AWS_ROLE_TO_ASSUME_DEV`, `AWS_ROLE_TO_ASSUME_PROD`.
 
-Lambda function names follow the pattern `lectureclip-{env}-{function}` (e.g. `lectureclip-dev-video-upload`).
+Lambda function names follow the pattern `lectureclip-{env}-{function}` (e.g. `lectureclip-dev-chat`).
 
 Manual deployment:
 ```bash
@@ -156,7 +231,7 @@ Manual deployment:
 ./scripts/deploy.sh --env prod
 
 # Deploy a single function to dev
-./scripts/deploy.sh --env dev --function video-upload
+./scripts/deploy.sh --env dev --function chat
 
 # Deploy to a specific region
 ./scripts/deploy.sh --env prod --region us-east-1
