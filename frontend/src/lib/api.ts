@@ -195,7 +195,14 @@ export async function queryVideo(
   const res = await fetch(`${API_BASE}/query-info`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ videoId, query, k: 5 }),
+        body: JSON.stringify({
+          videoId,
+          query,
+          k: 5,
+          includeFrames: true,
+          textWeight: 0.5,
+          frameWeight: 0.5,
+        }),
   })
   if (!res.ok) {
     throw new Error(`Query failed: ${res.status}`)
